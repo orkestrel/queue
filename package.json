@@ -1,21 +1,22 @@
 {
-	"name": "@orkestrel/reason",
+	"name": "@orkestrel/queue",
 	"version": "0.0.1",
-	"description": "A typed reasoning engine: definitions, subjects, and quantitative/logical/symbolic/inferential reasoners. Part of the @orkestrel line.",
+	"description": "A typed, persistent-capable FIFO job queue — bounded concurrency, retries, per-attempt timeout/abort, and an optional durable store for resuming outstanding work after a restart. Part of the @orkestrel line.",
 	"keywords": [
-		"decision-engine",
-		"inference",
-		"reason",
-		"reasoning",
-		"rules-engine",
+		"async",
+		"concurrency",
+		"fifo",
+		"job-queue",
+		"queue",
+		"retry",
 		"typescript"
 	],
-	"homepage": "https://github.com/orkestrel/reason#readme",
-	"bugs": "https://github.com/orkestrel/reason/issues",
+	"homepage": "https://github.com/orkestrel/queue#readme",
+	"bugs": "https://github.com/orkestrel/queue/issues",
 	"license": "MIT",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/orkestrel/reason.git"
+		"url": "git+https://github.com/orkestrel/queue.git"
 	},
 	"files": [
 		"dist",
@@ -63,8 +64,11 @@
 		"prepublishOnly": "npm run format:check && npm run lint:check && npm run check && npm run check:src && npm run build && npm test"
 	},
 	"dependencies": {
+		"@orkestrel/abort": "^0.0.1",
 		"@orkestrel/contract": "^0.0.1",
-		"@orkestrel/emitter": "^0.0.1"
+		"@orkestrel/database": "^0.0.2",
+		"@orkestrel/emitter": "^0.0.1",
+		"@orkestrel/timeout": "^0.0.1"
 	},
 	"devDependencies": {
 		"@microsoft/api-extractor": "^7.58.9",

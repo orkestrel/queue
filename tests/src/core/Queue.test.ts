@@ -1,7 +1,8 @@
 import type { QueueExecution, QueueStoreInterface, StoredEntry } from '@src/core'
-import type { TestGateInterface } from '../../../setup.js'
+import type { TestGateInterface } from '../../setup.js'
 import { describe, expect, it } from 'vitest'
-import { createMemoryQueueStore, Queue, stringShape } from '@src/core'
+import { stringShape } from '@orkestrel/contract'
+import { createMemoryQueueStore, Queue } from '@src/core'
 import {
 	createErrorRecorder,
 	createGate,

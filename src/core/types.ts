@@ -1,29 +1,4 @@
-import type { EmitterErrorHandler, EmitterHooks, EmitterInterface } from '../emitters/types.js'
-
-/**
- * Discriminated success branch of a {@link Result}.
- *
- * @remarks
- * Used for operations that can succeed or fail without throwing.
- */
-export interface Success<T> {
-	readonly success: true
-	readonly value: T
-}
-
-/**
- * Discriminated failure branch of a {@link Result}.
- *
- * @remarks
- * Carries the error value when an operation does not succeed.
- */
-export interface Failure<E> {
-	readonly success: false
-	readonly error: E
-}
-
-/** Discriminated union for operations that can succeed or fail without throwing. */
-export type Result<T, E = Error> = Success<T> | Failure<E>
+import type { EmitterErrorHandler, EmitterHooks, EmitterInterface } from '@orkestrel/emitter'
 
 /**
  * The push observation surface of a {@link QueueInterface} (AGENTS §13) — the lifecycle
@@ -61,65 +36,6 @@ export type QueueEventMap<TResult> = {
 	/** The queue was aborted — the cancel reason. */
 	readonly abort: readonly [reason: unknown]
 	/** The queue went idle — no pending entries and none in flight (drained). */
-	readonly drain: readonly []
-}
-
-/**
- * The push observation surface of a {@link PoolInterface} (AGENTS §13) — the resource
- * lifecycle moments a fire-and-forget observer subscribes to.
- *
- * @remarks
- * Pure signals (no `T` payload — `Pool<T>` carries no resource value on its events, so a
- * non-generic map stays lean). Listener isolation is the emitter's (AGENTS §13): every event
- * is emitted directly and a listener throw is routed to the emitter's `error` handler (the
- * `error` option), never onto this map, and sits AFTER the relevant create / acquire /
- * release / destroy transition — so a throwing observer can never corrupt the FIFO
- * handoff-eviction machinery (it cannot strand a parked waiter or unbalance the lease count).
- * Subscribe via `pool.emitter.on(...)`. Declared as a `type` alias (§4.5 — `EventMap` is a
- * `type` kind).
- */
-export type PoolEventMap = {
-	/** A fresh resource was created (`create` resolved) and leased. */
-	readonly create: readonly []
-	/** A token was handed to a lessee (a reused idle one, a fresh one, or a served waiter). */
-	readonly acquire: readonly []
-	/** A leased resource returned to idle (no waiter was parked). */
-	readonly release: readonly []
-	/** A resource was destroyed (`clear` / `destroy`, or a failed `validate`). */
-	readonly destroy: readonly []
-}
-
-/**
- * The push observation surface of a {@link WorkerInterface} (AGENTS §13) — the job
- * lifecycle a fire-and-forget observer subscribes to, surfacing the underlying queue's
- * moments so a Worker consumer never reaches through to the internal `Queue`.
- *
- * @typeParam TResult - The value a job resolves (the `success` payload), mirroring the
- *   {@link WorkerInterface}'s own `TResult`.
- *
- * @remarks
- * A Worker is a {@link Queue}⨉{@link Pool} facade; this map RE-EXPOSES the queue lifecycle
- * the worker surfaces (`enqueue` / `start` / `retry` / `success` / `failure` / `abort` /
- * `drain`) as the worker's OWN events — wired from the underlying queue's emitter at
- * construction, so a buggy observer is isolated exactly as on the queue (a throw routes to
- * the worker emitter's `error` handler, AGENTS §13). The pool's create / acquire / release
- * events stay the pool's internal concern (a Worker manages its own resources); a consumer
- * who wants them observes a `Pool` directly. Declared as a `type` alias (§4.5).
- */
-export type WorkerEventMap<TResult> = {
-	/** A job was accepted — its id (delegated from the underlying queue's `enqueue`). */
-	readonly enqueue: readonly [id: string]
-	/** A job's attempt began running — its id. */
-	readonly start: readonly [id: string]
-	/** A failed job attempt is being retried — its id + the next (1-based) attempt index. */
-	readonly retry: readonly [id: string, attempt: number]
-	/** A job settled successfully — its id + the resolved result. */
-	readonly success: readonly [id: string, result: TResult]
-	/** A job settled with a terminal failure — its id + the error. */
-	readonly failure: readonly [id: string, error: unknown]
-	/** The worker was aborted — the cancel reason. */
-	readonly abort: readonly [reason: unknown]
-	/** The worker went idle — no pending jobs and none in flight. */
 	readonly drain: readonly []
 }
 

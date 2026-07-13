@@ -1,17 +1,18 @@
+import type { ContractShape, Infer } from '@orkestrel/contract'
+import type { QueueStoreInterface } from '@src/core'
 import { describe, expect, it } from 'vitest'
-import type { ContractShape, Infer, QueueStoreInterface } from '@src/core'
 import {
 	arrayShape,
 	booleanShape,
-	createDatabaseQueueStore,
-	createMemoryDriver,
 	integerShape,
 	nullableShape,
 	numberShape,
 	objectShape,
 	optionalShape,
 	stringShape,
-} from '@src/core'
+} from '@orkestrel/contract'
+import { createMemoryDriver } from '@orkestrel/database'
+import { createDatabaseQueueStore } from '@src/core'
 
 // A real DatabaseQueueStore over a fresh memory driver (no mocks) — the exact construction
 // `createMemoryQueueStore` USED to make before it became the plain-`Map` MemoryQueueStore

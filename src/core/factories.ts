@@ -1,17 +1,11 @@
-import type {
-	QueueInterface,
-	QueueOptions,
-	QueueStoreInterface,
-	StoredEntry,
-} from './types.js'
-import type { ContractShape, Infer } from '../contracts/index.js'
-import type { DriverInterface, TableInterface } from '../databases/index.js'
-import { integerShape, stringShape } from '../contracts/index.js'
-import { createDatabase } from '../databases/index.js'
+import type { ContractShape, Infer } from '@orkestrel/contract'
+import type { DriverInterface, TableInterface } from '@orkestrel/database'
+import type { QueueInterface, QueueOptions, QueueStoreInterface, StoredEntry } from './types.js'
+import { integerShape, stringShape } from '@orkestrel/contract'
+import { createDatabase } from '@orkestrel/database'
 import { Queue } from './Queue.js'
 import { DatabaseQueueStore } from './stores/DatabaseQueueStore.js'
 import { MemoryQueueStore } from './stores/MemoryQueueStore.js'
-
 
 /**
  * Create a concurrent, cooperative job queue — a bounded-concurrency engine that

@@ -1,12 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import {
-	createDatabaseQueueStore,
-	createMemoryDriver,
-	createMemoryQueueStore,
-	createQueue,
-	stringShape,
-} from '@src/core'
-import { createRecorder, waitForDelay } from '../../../setup.js'
+import { stringShape } from '@orkestrel/contract'
+import { createMemoryDriver } from '@orkestrel/database'
+import { createDatabaseQueueStore, createMemoryQueueStore, createQueue } from '@src/core'
+import { createRecorder } from '../../setup.js'
 
 // src/core/workers/factories.ts — createQueue / createPool / createWorker each wire up
 // a working, typed interface end to end (AGENTS §16).

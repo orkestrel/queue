@@ -1,23 +1,25 @@
-# @orkestrel/reason
+# @orkestrel/queue
 
-A zero-dependency, synchronous, deterministic **reasoning engine**: declarative,
-JSON-serializable **definitions** are evaluated against **subjects** (plain
-data records) to produce traceable **results**. Four strategies behind one
-dispatch surface — `quantitative` (factor-based numeric scoring), `logical`
-(rule-based boolean deduction with forward / backward chaining), `symbolic`
-(algebraic equation solving by variable isolation), `inferential` (fact
-derivation with unification variables and proof trees) — each a
-`ReasonerInterface` registered on the thin `Reason` orchestrator, with three
-injectable operators (`Evaluator` / `Transformer` / `Aggregator`) doing the
-shared arithmetic. Every result is a fresh object carrying `success`, a
-human-readable `trace`, and accumulated `errors`; nothing mutates its inputs.
-Environment-agnostic — no I/O, no browser or server assumptions. Part of the
-`@orkestrel` line.
+A concurrent, cooperative typed **FIFO job queue**: `Queue` runs enqueued
+inputs through a handler under bounded concurrency, with retries and a
+per-attempt timeout / abort — each `enqueue` returns a promise that settles
+with the job's result. Idle worker loops **park** on a wake list instead of
+busy-polling, so an idle queue burns zero CPU; `enqueue` / `resume` wake
+exactly one (or all) parked loops. Cancellation is built on the L1 abort +
+timeout primitives, so an attempt that ignores its `signal` still fails when
+the per-attempt deadline runs out. Durability is opt-in and outstanding-only —
+pass a `store` and a `restore()` after a restart re-runs precisely the
+unfinished work; `DatabaseQueueStore` persists over any driver, and
+`MemoryQueueStore` is the zero-plumbing in-process default. The queue is
+observable (a typed `emitter` surfaces `enqueue` / `start` / `retry` /
+`success` / `failure` / `abort` / `drain`) and deliberately de-bloated — no
+scheduler, no priorities. Environment-agnostic — no I/O, no browser or server
+assumptions. Part of the `@orkestrel` line.
 
 ## Install
 
 ```sh
-npm install @orkestrel/reason
+npm install @orkestrel/queue
 ```
 
 ## Requirements
@@ -28,41 +30,24 @@ npm install @orkestrel/reason
 ## Usage
 
 ```ts
-import {
-	createQuantitativeReasoner,
-	createReason,
-	factorGroup,
-	fieldFactor,
-	quantitativeDefinition,
-	staticFactor,
-} from '@orkestrel/reason'
+import { createQueue } from '@orkestrel/queue'
 
-const reason = createReason({ reasoners: [createQuantitativeReasoner()] })
+const queue = createQueue<string, number>({
+	handler: async (url, { signal }) => (await fetch(url, { signal })).status,
+	concurrency: 4, // up to four in flight at once (default 1 = ordered)
+	retries: 2, // two extra attempts on failure
+	timeout: 5_000, // each attempt is bounded to 5s
+})
 
-const definition = quantitativeDefinition('risk', 'Risk score', [
-	factorGroup('drivers', 'sum', [
-		fieldFactor('age', 'age'), // reads subject.age, parseNumber-coerced
-		staticFactor('floor', 10), // a fixed contribution
-	]),
-])
-
-const result = reason.reason({ age: 25 }, definition) // one subject → one result
-if (result.reasoning === 'quantitative') result.value // 35 — narrow by the discriminant
-result.trace // the step-by-step account of how the value came to be
+const status = await queue.enqueue('https://example.com')
 ```
-
-`reason` dispatches by `definition.reasoning` — pass an ARRAY of subjects and
-the batch overload maps them in order to an equal-length result array.
-Results are a discriminated union (`reasoning` names the axis): narrow with
-the discriminant and read the strategy-specific payload (`value` /
-`conclusion` / `solutions` / `derived`).
 
 ## Guide
 
-For the full surface — the orchestrator, the four reasoners, the three
-operators, the definitions & subjects capability layer, the two workspace
-builders (`DefinitionBuilder` / `SubjectBuilder`), validators, errors, and the
-observation surface — see [`guides/src/reason.md`](guides/src/reason.md).
+For the full surface — the `Queue` engine, options, the durable
+`QueueStoreInterface` (`MemoryQueueStore` / `DatabaseQueueStore`), the
+observable `emitter`, and usage patterns — see
+[`guides/src/queue.md`](guides/src/queue.md).
 
 ## Package
 

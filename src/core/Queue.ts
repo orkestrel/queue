@@ -1,6 +1,7 @@
-import type { AbortInterface } from '../aborts/index.js'
-import type { EmitterInterface } from '../emitters/types.js'
-import type { TimeoutInterface } from '../timeouts/index.js'
+import type { AbortInterface } from '@orkestrel/abort'
+import type { Result } from '@orkestrel/contract'
+import type { EmitterInterface } from '@orkestrel/emitter'
+import type { TimeoutInterface } from '@orkestrel/timeout'
 import type {
 	QueueEntry,
 	QueueEntryOptions,
@@ -10,10 +11,9 @@ import type {
 	QueueOptions,
 	QueueStoreInterface,
 } from './types.js'
-import { createAbort } from '../aborts/index.js'
-import { createTimeout } from '../timeouts/index.js'
-import { Emitter } from '../emitters/Emitter.js'
-import {Result} from "./types";
+import { createAbort } from '@orkestrel/abort'
+import { Emitter } from '@orkestrel/emitter'
+import { createTimeout } from '@orkestrel/timeout'
 
 /**
  * A concurrent, cooperative job queue.
@@ -372,10 +372,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	// `outcome` carries what to settle WITH so the terminal `success` / `failure` event fires
 	// strictly AFTER the resolve / reject (and after the durable `remove` on the store path),
 	// in the same microtask position the settle has always occupied — observation only.
-	#settle(
-		entry: QueueEntry<TInput, TResult>,
-		outcome: Result<TResult>,
-	): void | Promise<void> {
+	#settle(entry: QueueEntry<TInput, TResult>, outcome: Result<TResult>): void | Promise<void> {
 		// The entry is no longer live — drop its id so a concurrent `restore` may re-launch
 		// the row should it linger in the store (the single removal point for a settled run,
 		// balancing every accept; the drain path removes the ids it rejects instead).
