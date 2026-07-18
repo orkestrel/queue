@@ -1,6 +1,6 @@
 {
 	"name": "@orkestrel/queue",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"description": "A typed, persistent-capable FIFO job queue — bounded concurrency, retries, per-attempt timeout/abort, and an optional durable store for resuming outstanding work after a restart. Part of the @orkestrel line.",
 	"keywords": [
 		"async",
@@ -48,7 +48,7 @@
 		"copy": "node -e \"const fs=require('node:fs'),p=require('node:path'),a=process.argv[1],b=process.argv[2];fs.mkdirSync(p.dirname(b),{recursive:true});fs.cpSync(a,b,{force:true});console.log('Copied: '+a+' to '+b)\"",
 		"tmp:txt": "node -e \"const fs=require('node:fs'),p=require('node:path');function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory()){walk(f)}else if(!e.name.endsWith('.md')&&!e.name.endsWith('.txt')){const t=f+'.txt';if(!fs.existsSync(t)){fs.renameSync(f,t)}else{console.warn('Skipping '+f+' — target exists: '+t)}}}}try{walk('tmp')}catch(e){if(e.code!=='ENOENT')throw e}\"",
 		"lint": "oxlint --config .oxlintrc.json --fix .",
-		"check": "tsc --noEmit --project tsconfig.json",
+		"check": "tsc --noEmit --project tsconfig.json && npm run check:src",
 		"check:src": "npm run check:src:core",
 		"check:src:core": "tsc --noEmit -p configs/src/tsconfig.core.json",
 		"format": "oxfmt --config .oxfmtrc.json --write .",
@@ -61,27 +61,27 @@
 		"build": "npm run clean && npm run build:src",
 		"build:src": "npm run build:src:core",
 		"build:src:core": "vite build --config configs/src/vite.core.config.ts && npm run copy dist/src/core/index.d.ts dist/src/core/index.d.cts",
-		"prepublishOnly": "npm run format:check && npm run lint:check && npm run check && npm run check:src && npm run build && npm test"
+		"prepublishOnly": "npm run format:check && npm run lint:check && npm run check && npm run build && npm test"
 	},
 	"dependencies": {
-		"@orkestrel/abort": "^0.0.1",
-		"@orkestrel/contract": "^0.0.1",
-		"@orkestrel/database": "^0.0.2",
-		"@orkestrel/emitter": "^0.0.1",
-		"@orkestrel/timeout": "^0.0.1"
+		"@orkestrel/abort": "^0.0.2",
+		"@orkestrel/contract": "^0.0.2",
+		"@orkestrel/database": "^0.0.4",
+		"@orkestrel/emitter": "^0.0.2",
+		"@orkestrel/timeout": "^0.0.2"
 	},
 	"devDependencies": {
-		"@microsoft/api-extractor": "^7.58.9",
-		"@orkestrel/guide": "^0.0.1",
+		"@microsoft/api-extractor": "^7.58.11",
+		"@orkestrel/guide": "^0.0.2",
 		"@types/node": "^26.1.1",
-		"oxfmt": "^0.58.0",
-		"oxlint": "^1.73.0",
+		"oxfmt": "^0.59.0",
+		"oxlint": "^1.74.0",
 		"typescript": "^6.0.3",
-		"vite": "^8.1.4",
+		"vite": "^8.1.5",
 		"vite-plugin-dts": "^5.0.3",
 		"vitest": "^4.1.10"
 	},
 	"engines": {
-		"node": ">=24"
+		"node": ">=22"
 	}
 }
