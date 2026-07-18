@@ -66,7 +66,7 @@
 	"dependencies": {
 		"@orkestrel/abort": "^0.0.3",
 		"@orkestrel/contract": "^0.0.5",
-		"@orkestrel/database": "^0.0.6",
+		"@orkestrel/database": "^0.0.5",
 		"@orkestrel/emitter": "^0.0.3",
 		"@orkestrel/timeout": "^0.0.3"
 	},
