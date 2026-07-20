@@ -14,7 +14,6 @@ const resolve = {
 	),
 }
 
-// Base: shared resolve + build defaults + src:core tests.
 export const srcCore = (config?: UserConfig): UserConfig =>
 	mergeConfig(
 		{
@@ -35,8 +34,6 @@ export const srcCore = (config?: UserConfig): UserConfig =>
 		config ?? {},
 	)
 
-// Extends srcCore: the guides-parity suite. Node env — it reads the real
-// guides/*.md and the documented source modules off disk — but resolves like core tests.
 export const guides = (config?: UserConfig): UserConfig =>
 	srcCore(
 		mergeConfig(
