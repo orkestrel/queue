@@ -33,7 +33,7 @@ Declare a `tables` shape map (keys are table names) once, and reach each
 table — fully typed, no annotations — with `table(name)`:
 
 ```ts
-import { createDatabase, createMemoryDriver } from '@src/core'
+import { createDatabase, createMemoryDriver } from '@orkestrel/database'
 import { integerShape, stringShape } from '@orkestrel/contract'
 
 const db = createDatabase({
@@ -97,6 +97,7 @@ produces the JSON Schema, and seeds fixtures.
 | `matchesDeclaredType`      | function  | Whether an operand's runtime type matches a column's declared exact type (text↔string, integer/real↔finite number, boolean↔boolean) — backs `isExactCondition`.                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `EXACT_COLUMN_TYPES`       | const     | The declared `ColumnType`s whose SQL EQUALITY / `starts`/`ends` comparisons are provably engine-exact under declared-type trust (`text` / `integer` / `real` / `boolean`).                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `EXACT_RANGE_COLUMN_TYPES` | const     | The declared `ColumnType`s whose SQL RANGE comparisons and `ORDER BY` are provably engine-exact (`integer` / `real` / `boolean` — `text` is excluded; see `isExactCondition`).                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `extractValues`            | function  | Extract a `SQLiteRow`'s values in declared positional binding order; throws a typed `DRIVER` error when a requested column is missing.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `indexName`                | function  | Derive a collision-free, length-prefixed SQL index name from a table and its column list (`idx_<len>_<table>_<len>_<col>…`) — used by `schemaToIndexes` and `stepToSQL`.                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `SQLiteDriverOptions`      | interface | `{ path?, readonly?, timeout?, foreignKeys?, pragmas? }` — the options bag `createSQLiteDriver` accepts (widened from a bare path string, back-compat).                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
@@ -740,7 +741,7 @@ that doesn't already exist; everything above is unchanged once it lands.
 ### Declaring tables in options
 
 ```ts
-import { createDatabase, createMemoryDriver } from '@src/core'
+import { createDatabase, createMemoryDriver } from '@orkestrel/database'
 import { integerShape, literalShape, optionalShape, stringShape } from '@orkestrel/contract'
 
 const db = createDatabase({
@@ -778,8 +779,8 @@ and in production. Pick the driver per environment and pass it to
 `createDatabase`:
 
 ```ts
-import { createDatabase, createMemoryDriver } from '@src/core' // tests / ephemeral — no I/O
-import { createJSONDriver } from '@src/server' // node — persisted to a file
+import { createDatabase, createMemoryDriver } from '@orkestrel/database' // tests / ephemeral — no I/O
+import { createJSONDriver } from '@orkestrel/database/server' // node — persisted to a file
 
 const driver =
 	process.env.NODE_ENV === 'test' ? createMemoryDriver() : createJSONDriver('data/app.json')
@@ -852,7 +853,7 @@ already-fired signal throws `ABORTED`; `scan` / `stream` re-check it before
 each yield, so an abort mid-iteration stops promptly:
 
 ```ts
-import { checkAbort, isDatabaseError } from '@src/core'
+import { checkAbort, isDatabaseError } from '@orkestrel/database'
 
 // A time-boxed read — abort after 50ms.
 try {
@@ -1024,7 +1025,7 @@ events fire the same either way, so calling code and observers can't tell
 which floor ran:
 
 ```ts
-import type { DriverInterface, TransactionInterface } from '@src/core'
+import type { DriverInterface, TransactionInterface } from '@orkestrel/database'
 
 // A driver opting into native BEGIN/COMMIT/ROLLBACK — Database.transaction
 // prefers this over the snapshot-based rollback floor when present.
@@ -1056,7 +1057,7 @@ the pure per-table row transform a driver's `migrate` can lean on. Calling
 (useful outside a `Database`, e.g. against a bare driver):
 
 ```ts
-import { createMemoryDriver, migrateRows, planMigration } from '@src/core'
+import { createMemoryDriver, migrateRows, planMigration } from '@orkestrel/database'
 
 const deployed = [{ name: 'users', primary: 'id', columns: [], indexes: [] }]
 const declared = [
@@ -1083,7 +1084,7 @@ orchestration against the database's OWN declared `tables`, so the caller
 only has to track what is currently deployed:
 
 ```ts
-import { createDatabase, createMemoryDriver } from '@src/core'
+import { createDatabase, createMemoryDriver } from '@orkestrel/database'
 import { integerShape, stringShape } from '@orkestrel/contract'
 
 const db = createDatabase({
@@ -1107,8 +1108,8 @@ do) can skip the caller-driven `Database.migrate` call entirely: pass
 schema against the declared one for you, migrating and re-stamping as needed:
 
 ```ts
-import { createDatabase, createMemoryDriver } from '@src/core'
-import { generateKey } from '@src/server'
+import { createDatabase, createMemoryDriver } from '@orkestrel/database'
+import { generateKey } from '@orkestrel/database/server'
 import { integerShape, stringShape } from '@orkestrel/contract'
 
 const driver = createMemoryDriver() // any DriverInterface implementing meta/stamp
@@ -1134,7 +1135,7 @@ uphold — call it from a new driver's own test suite (or a smoke script) to
 prove it is a drop-in `DriverInterface`:
 
 ```ts
-import { conformDriver, createMemoryDriver } from '@src/core'
+import { conformDriver, createMemoryDriver } from '@orkestrel/database'
 
 await conformDriver(() => createMemoryDriver()) // resolves once every phase passes
 // A driver that violates an invariant rejects with DatabaseError('CONFORMANCE', ...)
@@ -1148,14 +1149,14 @@ wanting the complete picture in one run rather than fixing one invariant at
 a time:
 
 ```ts
-import { auditDriver, createMemoryDriver } from '@src/core'
+import { auditDriver, createMemoryDriver } from '@orkestrel/database'
 
 const findings = await auditDriver(() => createMemoryDriver())
 // [] — a fully conformant driver
 for (const finding of findings) console.log(`${finding.check}: ${finding.message}`)
 
 // The lower-level generator these two build on — one phase per yield, lazy:
-import { driverFindings } from '@src/core'
+import { driverFindings } from '@orkestrel/database'
 for await (const finding of driverFindings(() => createMemoryDriver())) {
 	console.log(finding.check, finding.context)
 }
@@ -1168,8 +1169,8 @@ throws `VALIDATION` unless `DatabaseOptions.key` supplies a `KeyFunction`.
 The server ships `generateKey` (`node:crypto`-backed):
 
 ```ts
-import { createDatabase, createMemoryDriver } from '@src/core'
-import { generateKey } from '@src/server'
+import { createDatabase, createMemoryDriver } from '@orkestrel/database'
+import { generateKey } from '@orkestrel/database/server'
 import { stringShape } from '@orkestrel/contract'
 
 const db = createDatabase({
@@ -1194,7 +1195,7 @@ AFTER the relevant transition, so a listener can never change what a write
 or a transaction does.
 
 ```ts
-import { createDatabase, createMemoryDriver } from '@src/core'
+import { createDatabase, createMemoryDriver } from '@orkestrel/database'
 import { stringShape } from '@orkestrel/contract'
 
 const db = createDatabase({
@@ -1293,7 +1294,7 @@ implements; `Database` / `Table` are the ergonomic layer built on it. Calling
 it directly (as `Table` does internally) shows the whole REQUIRED surface:
 
 ```ts
-import { createMemoryDriver } from '@src/core'
+import { createMemoryDriver } from '@orkestrel/database'
 
 const driver = createMemoryDriver()
 await driver.open([{ name: 'users', primary: 'id', columns: [], indexes: [] }])
@@ -1329,7 +1330,7 @@ import {
 	shapeToColumnType,
 	sortRows,
 	wildcardMatch,
-} from '@src/core'
+} from '@orkestrel/database'
 
 compareValues(1, 2) // -1 — a total order over mixed types
 wildcardMatch('hello', 'h%o', '%', '_', true) // true — the shared LIKE/GLOB engine
@@ -1353,8 +1354,8 @@ deepEqual({ a: [1, { b: 2 }] }, { a: [1, { b: 2 }] }) // true — structural, no
 ### Persistence with the JSON driver
 
 ```ts
-import { createDatabase } from '@src/core'
-import { createJSONDriver } from '@src/server'
+import { createDatabase } from '@orkestrel/database'
+import { createJSONDriver } from '@orkestrel/database/server'
 import { stringShape } from '@orkestrel/contract'
 
 const db = createDatabase({
@@ -1378,8 +1379,8 @@ The server's pure `compilers.ts` turns a core `Criteria` (the same one
 driver's `records` / `count` hook runs directly:
 
 ```ts
-import { compileCriteria } from '@src/server'
-import type { TableSchema } from '@src/core'
+import { compileCriteria } from '@orkestrel/database/server'
+import type { TableSchema } from '@orkestrel/database'
 
 const schema: TableSchema = {
 	name: 'users',
@@ -1419,8 +1420,8 @@ caller's side: `Table.records` / `count` / `stream` return identical rows
 either way; only the path to get there differs.
 
 ```ts
-import { isExactCondition, isExactCriteria, isExactOrder } from '@src/server'
-import type { TableSchema } from '@src/core'
+import { isExactCondition, isExactCriteria, isExactOrder } from '@orkestrel/database/server'
+import type { TableSchema } from '@orkestrel/database'
 
 const schema: TableSchema = {
 	name: 'users',
@@ -1446,8 +1447,8 @@ isExactCriteria({ conditions: [exact], order: [{ column: 'age', direction: 'asce
 ### Persistence with the SQLite driver
 
 ```ts
-import { createDatabase } from '@src/core'
-import { createSQLiteDriver } from '@src/server'
+import { createDatabase } from '@orkestrel/database'
+import { createSQLiteDriver } from '@orkestrel/database/server'
 import { integerShape, stringShape } from '@orkestrel/contract'
 
 const db = createDatabase({
@@ -1488,8 +1489,8 @@ corrupting metadata.
 ### Persistence with the IndexedDB driver
 
 ```ts
-import { createDatabase } from '@src/core'
-import { createIndexedDBDriver } from '@src/browser'
+import { createDatabase } from '@orkestrel/database'
+import { createIndexedDBDriver } from '@orkestrel/database/browser'
 import { stringShape } from '@orkestrel/contract'
 
 // Feature-detect before reaching for it — IndexedDB is a browser-only global.
@@ -1522,8 +1523,8 @@ The pure planner behind `IndexedDBDriver`'s native `records?` / `count?` /
 ever touches a browser database:
 
 ```ts
-import type { TableSchema } from '@src/core'
-import { conditionRange, isKey, selectPlan } from '@src/browser'
+import type { TableSchema } from '@orkestrel/database'
+import { conditionRange, isKey, selectPlan } from '@orkestrel/database/browser'
 
 const schema: TableSchema = {
 	name: 'users',
@@ -1560,7 +1561,7 @@ surface — every one is mapped to a `DatabaseError`, the original preserved
 as `context.cause`:
 
 ```ts
-import { mapIndexedDBError, mapMigrationError } from '@src/browser'
+import { mapIndexedDBError, mapMigrationError } from '@orkestrel/database/browser'
 import type { IndexedDBError } from '@orkestrel/indexeddb'
 
 declare const fault: IndexedDBError // a caught backend fault
@@ -1607,7 +1608,7 @@ mapMigrationError(fault) // → the same, but an UPGRADE fault becomes 'MIGRATIO
 - [`tests/src/core/factories.test.ts`](../../tests/src/core/factories.test.ts) — `createDatabase` / `createMemoryDriver` each return a working instance of their interface (a round-trip end to end).
 - [`tests/src/server/drivers/JSONDriver.test.ts`](../../tests/src/server/drivers/JSONDriver.test.ts) — `JSONDriver`'s persistence: `open` loads an existing file (and starts empty on a missing/corrupt/wrong-shaped one), every mutation flushes the whole store, `snapshot` rollback re-persists the restored state, querying runs through the inherited `MemoryDriver` engine unchanged, `stream` delegates to the inner memory driver, and `transaction` (flush-coalescing: the file stays unchanged mid-transaction then reflects every write on `commit`, `rollback` restores memory and the file, re-entering an active transaction throws `CONFLICT`, and normal per-mutation flushing resumes once the handle settles).
 - [`tests/src/server/drivers/SQLiteDriver.test.ts`](../../tests/src/server/drivers/SQLiteDriver.test.ts) — `SQLiteDriver`'s full native surface: `open`'s real DDL (reopen-safe), a `VALIDATION` throw when a declared table is named `_meta`, keyed CRUD + codec round-trips, the `CLOSED` gate, native `records` / `count` / `aggregate` / `stream` running natively ONLY when `isExactCriteria` proves the query exact and refining through the core engine otherwise (patterns, null/undefined operands, `json`/`blob` columns, nested paths), case-sensitive `starts` / `ends`, native `aggregate`'s zero-row `undefined`/`0` cases, `snapshot` capture-replay, persistence across a reopen against a temp file, `migrate` (atomic DDL via `stepToSQL`/`stepToSchema`, rejecting `MIGRATION` on an unknown table or a shared column's type/nullable drift), `meta` / `stamp` across a reopen, native `transaction` (double-settle `CONFLICT`), backend-fault → `DatabaseError` mapping (`CONSTRAINT`→`CONFLICT`, `CLOSED`→`CLOSED`, `BUSY`→`DRIVER` retryable, else `DRIVER`), and exact-vs-refine parity — the driver's results checked against the same criteria run through the core engine via `conformDriver`.
-- [`tests/src/server/helpers.test.ts`](../../tests/src/server/helpers.test.ts) — the SQL bridge: `columnSQL`, `quote`, `fieldColumn`, `aggregateSQL`, `encodeValue` / `decodeValue` round-trips, `encodeRow` / `decodeRow` over a schema, `schemaToTable` / `schemaToIndexes` DDL projections, `indexName`'s collision-free length-prefixed naming, and `isExactCondition` / `isExactOrder` / `isExactCriteria`'s exactness predicates across every operator, nested path, and mismatched-type case.
+- [`tests/src/server/helpers.test.ts`](../../tests/src/server/helpers.test.ts) — the SQL bridge: `columnSQL`, `quote`, `fieldColumn`, `aggregateSQL`, `encodeValue` / `decodeValue` round-trips, `encodeRow` / `decodeRow` over a schema, `extractValues` positional order and missing-column `DRIVER` fault, `schemaToTable` / `schemaToIndexes` DDL projections, `indexName`'s collision-free length-prefixed naming, and `isExactCondition` / `isExactOrder` / `isExactCriteria`'s exactness predicates across every operator, nested path, and mismatched-type case.
 - [`tests/src/server/compilers.test.ts`](../../tests/src/server/compilers.test.ts) — the pure `Criteria` → SQL compilers: `escapeLike`, `declaredType` / `valueType`, `fragment`, `compileWhere`, `compileOrder`, `compilePage`, and `compileCriteria`'s full clause assembly.
 - [`tests/src/server/parity.test.ts`](../../tests/src/server/parity.test.ts) — cross-backend behavioral parity: the same `Criteria` set run against `MemoryDriver` and `SQLiteDriver` (both exact-path and refine-path queries) produce identical rows/counts/aggregates.
 - [`tests/src/browser/drivers/IndexedDBDriver.test.ts`](../../tests/src/browser/drivers/IndexedDBDriver.test.ts) — `IndexedDBDriver`'s full surface against a real IndexedDB: `open`'s store/index creation (reopen-safe, auto-managed) and a `VALIDATION` throw when a declared table is named `__meta__`, keyed CRUD, native `records` / `count` / `stream` pushdown (primary-key and secondary-index ranges, `below`/`to` primary-only pushdown, reversed-`between` full-scan fallback, general full-scan fallback), `snapshot` capture-replay in one read transaction (excluding `__meta__`), `migrate` via a versionchange reconnect (rejecting `MIGRATION` on an unknown table), `meta` / `stamp` via the reserved `__meta__` store, backend-fault → `DatabaseError` mapping (`CONSTRAINT`→`CONFLICT`, `CLOSED`/`NOT_OPEN`/`INVALID`→`CLOSED`, `QUOTA`/`BLOCKED`→`DRIVER`, migrate `UPGRADE`→`MIGRATION`), and confirmation that `transaction` / `aggregate` are absent.

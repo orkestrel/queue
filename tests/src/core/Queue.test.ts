@@ -1,4 +1,4 @@
-import type { QueueExecution, QueueStoreInterface, StoredEntry } from '@src/core'
+import type { QueueEventMap, QueueExecution, QueueStoreInterface, StoredEntry } from '@src/core'
 import type { TestGateInterface } from '../../setup.js'
 import { describe, expect, it } from 'vitest'
 import { stringShape } from '@orkestrel/contract'
@@ -8,6 +8,7 @@ import {
 	createGate,
 	createRecorder,
 	recordEmitterEvents,
+	requireElement,
 	waitForDelay,
 } from '../../setup.js'
 
@@ -56,7 +57,7 @@ describe('Queue — bounded concurrency', () => {
 				started.handler(input)
 				live += 1
 				peak = Math.max(peak, live)
-				await gates[input].promise
+				await requireElement(gates, input).promise
 				live -= 1
 			},
 		})
@@ -68,14 +69,14 @@ describe('Queue — bounded concurrency', () => {
 		expect(started.count).toBe(2)
 		expect(queue.active).toBe(2)
 
-		gates[0].resolve()
+		requireElement(gates, 0).resolve()
 		await waitForDelay(10)
 		// Freeing one slot lets the third start; still never more than two at once.
 		expect(started.count).toBe(3)
 		expect(queue.active).toBe(2)
 
-		gates[1].resolve()
-		gates[2].resolve()
+		requireElement(gates, 1).resolve()
+		requireElement(gates, 2).resolve()
 		await Promise.all(all)
 		expect(peak).toBe(2)
 		expect(queue.active).toBe(0)
@@ -360,7 +361,7 @@ describe('Queue — durability: persist on accept, remove on settle', () => {
 			handler: async () => {
 				const index = attempts.count
 				attempts.handler()
-				await gates[index].promise
+				await requireElement(gates, index).promise
 				if (index < 2) throw new Error('not yet')
 				return 'ok'
 			},
@@ -372,17 +373,17 @@ describe('Queue — durability: persist on accept, remove on settle', () => {
 		expect((await store.load())[0]?.attempts).toBe(0)
 
 		// Fail attempt 0 → the queue retries; the climbing count is persisted (attempts 1).
-		gates[0].resolve()
+		requireElement(gates, 0).resolve()
 		await waitForDelay(10)
 		expect((await store.load())[0]?.attempts).toBe(1)
 
 		// Fail attempt 1 → retry again, persisted at attempts 2.
-		gates[1].resolve()
+		requireElement(gates, 1).resolve()
 		await waitForDelay(10)
 		expect((await store.load())[0]?.attempts).toBe(2)
 
 		// Attempt 2 succeeds → the row is removed.
-		gates[2].resolve()
+		requireElement(gates, 2).resolve()
 		await expect(running).resolves.toBe('ok')
 		expect(await store.load()).toEqual([])
 	})
@@ -678,7 +679,7 @@ describe('Queue — per-entry signal abort', () => {
 describe('Queue — restore on a live queue (no double-execution)', () => {
 	it('skips ids already live so each entry runs exactly once', async () => {
 		const store = createMemoryQueueStore(stringShape())
-		const inputs = ['one', 'two', 'three'] as const
+		const inputs: readonly string[] = ['one', 'two', 'three']
 		// One gate per input, pre-seeded so the handler only LOOKS one up (typed `void` so
 		// `resolve()` takes no argument).
 		const gates = new Map<string, TestGateInterface<void>>(
@@ -1303,7 +1304,7 @@ describe('Queue — wake-park under saturation has no stuck entry', () => {
 			concurrency: 2,
 			handler: async (input) => {
 				started.handler(input)
-				await gates[input].promise
+				await requireElement(gates, input).promise
 				return input
 			},
 		})
@@ -1316,13 +1317,13 @@ describe('Queue — wake-park under saturation has no stuck entry', () => {
 		expect(started.count).toBe(2) // only two started; the third is parked
 
 		// Free exactly one slot — the parked third entry must wake and start promptly.
-		gates[0].resolve()
+		requireElement(gates, 0).resolve()
 		await p0
 		await waitForDelay(10)
 		expect(started.calls.map(([input]) => input).sort()).toEqual([0, 1, 2])
 
-		gates[1].resolve()
-		gates[2].resolve()
+		requireElement(gates, 1).resolve()
+		requireElement(gates, 2).resolve()
 		await Promise.all([p1, p2])
 		expect(queue.count).toBe(0)
 		expect(queue.active).toBe(0)
@@ -1344,7 +1345,15 @@ describe('Queue — wake-park under saturation has no stuck entry', () => {
 // The QueueEventMap event names recorded across the emitter tests — fed to the shared
 // `recordEmitterEvents` (AGENTS §16.1: the per-event wiring is centralized; this file
 // keeps only the names its scenarios observe).
-const QUEUE_EVENTS = ['enqueue', 'start', 'retry', 'success', 'failure', 'abort', 'drain'] as const
+const QUEUE_EVENTS: readonly (keyof QueueEventMap<unknown>)[] = [
+	'enqueue',
+	'start',
+	'retry',
+	'success',
+	'failure',
+	'abort',
+	'drain',
+]
 
 describe('Queue — emitter (push observation surface)', () => {
 	it('a single entry fires enqueue → start → success → drain with the right payloads', async () => {

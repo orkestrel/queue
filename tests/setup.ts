@@ -42,6 +42,21 @@ export function createGate<T = void>(): TestGateInterface<T> {
 	return { promise, resolve, reject }
 }
 
+/**
+ * Require one indexed element from a test collection.
+ *
+ * @typeParam T - The collection element type
+ * @param values - The collection to read
+ * @param index - The zero-based index to require
+ * @returns The element at `index`
+ * @throws {Error} When `index` has no element
+ */
+export function requireElement<T>(values: readonly T[], index: number): T {
+	const value = values[index]
+	if (value === undefined) throw new Error(`Missing test element at index ${String(index)}`)
+	return value
+}
+
 // ── Call recorder (a real callback, not a mock) ──────────────────────────────
 //
 // AGENTS §16.1: when a test only needs to count calls or inspect arguments, use a
@@ -155,4 +170,10 @@ export function isTotal<TMap extends EventMap, TName extends keyof TMap>(
 	events: readonly TName[],
 ): recorders is EmitterRecorders<TMap, TName> {
 	return events.every((name) => recorders[name] !== undefined)
+}
+
+/** Whether a repository-relative Vue SFC path belongs to the private browser application. */
+export function isBrowserVuePath(path: string): boolean {
+	const normalized = path.replaceAll('\\', '/')
+	return normalized.startsWith('app/browser/')
 }

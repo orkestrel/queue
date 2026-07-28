@@ -1,4 +1,5 @@
-export type * from './types.js'
+export * from './types.js'
+export * from './helpers.js'
 export * from './Queue.js'
 export * from './stores/DatabaseQueueStore.js'
 export * from './stores/MemoryQueueStore.js'

@@ -14,6 +14,7 @@ import type {
 import { createAbort } from '@orkestrel/abort'
 import { Emitter } from '@orkestrel/emitter'
 import { createTimeout } from '@orkestrel/timeout'
+import { createAttemptError } from './helpers.js'
 
 /**
  * A concurrent, cooperative job queue.
@@ -91,7 +92,10 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		this.#retries = Math.max(0, options.retries ?? 0)
 		this.#timeout = Math.max(0, options.timeout ?? 0)
 		this.#store = options.store
-		this.#emitter = new Emitter<QueueEventMap<TResult>>({ on: options?.on, error: options?.error })
+		this.#emitter = new Emitter<QueueEventMap<TResult>>({
+			...(options.on !== undefined ? { on: options.on } : {}),
+			...(options.error !== undefined ? { error: options.error } : {}),
+		})
 		this.#spawn()
 	}
 
@@ -252,21 +256,20 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 
 	// The park point: resolve to the next ready entry, or `undefined` once halted.
 	#next(): Promise<QueueEntry<TInput, TResult> | undefined> {
-		return new Promise((resolve) => {
-			const take = (): void => {
-				if (this.#stopped || this.#aborted || this.#destroyed) {
-					resolve(undefined)
-					return
-				}
-				if (this.#paused || this.#pending.length === 0) {
-					// Park: hold a resolver that re-checks when a wake fires.
-					this.#wakes.push(take)
-					return
-				}
-				resolve(this.#pending.shift())
-			}
-			take()
-		})
+		return new Promise((resolve) => this.#take(resolve))
+	}
+
+	// Resolve one parked worker with an entry or halt signal; otherwise park it again.
+	#take(resolve: (entry: QueueEntry<TInput, TResult> | undefined) => void): void {
+		if (this.#stopped || this.#aborted || this.#destroyed) {
+			resolve(undefined)
+			return
+		}
+		if (this.#paused || this.#pending.length === 0) {
+			this.#wakes.push(() => this.#take(resolve))
+			return
+		}
+		resolve(this.#pending.shift())
 	}
 
 	// Wake exactly one parked worker (FIFO) — for a single new entry.
@@ -458,23 +461,32 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		signal: AbortSignal,
 		deadline: TimeoutInterface | undefined,
 	): Promise<TResult> {
-		const fault = (): Error =>
-			deadline?.expired === true ? new Error('attempt timed out') : new Error('attempt aborted')
-		if (signal.aborted) return Promise.reject(fault())
+		if (signal.aborted) return Promise.reject(createAttemptError(deadline?.expired === true))
+		const cleanup = new AbortController()
 		return new Promise<TResult>((resolve, reject) => {
-			const onAbort = (): void => reject(fault())
-			signal.addEventListener('abort', onAbort, { once: true })
-			const settle = (): void => signal.removeEventListener('abort', onAbort)
-			Promise.resolve(this.#handler(input, { id, signal })).then(
-				(value) => {
-					settle()
-					resolve(value)
-				},
-				(error: unknown) => {
-					settle()
-					reject(error)
+			signal.addEventListener(
+				'abort',
+				() => reject(createAttemptError(deadline?.expired === true)),
+				{
+					once: true,
+					signal: cleanup.signal,
 				},
 			)
+			try {
+				Promise.resolve(this.#handler(input, { id, signal })).then(
+					(value) => {
+						cleanup.abort()
+						resolve(value)
+					},
+					(error: unknown) => {
+						cleanup.abort()
+						reject(error)
+					},
+				)
+			} catch (error: unknown) {
+				cleanup.abort()
+				reject(error)
+			}
 		})
 	}
 }

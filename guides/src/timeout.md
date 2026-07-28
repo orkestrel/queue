@@ -20,7 +20,7 @@ Create a deadline handle, arm it, and hand its `signal` to deadline-aware
 work — `clear()` the deadline if the work finishes first:
 
 ```ts
-import { createTimeout } from '@src/core'
+import { createTimeout } from '@orkestrel/timeout'
 
 const timeout = createTimeout({ ms: 5_000 })
 timeout.start()
@@ -115,7 +115,7 @@ These invariants hold across `src/core` ↔ `timeout.md`:
 ### Race work against a deadline
 
 ```ts
-import { createTimeout } from '@src/core'
+import { createTimeout } from '@orkestrel/timeout'
 
 async function fetchWithDeadline(url: string, ms: number): Promise<Response> {
 	const timeout = createTimeout({ ms })
@@ -136,7 +136,7 @@ an outer cancellation (a request abort, a shutdown signal) short-circuits the
 timer cleanly:
 
 ```ts
-import { createTimeout } from '@src/core'
+import { createTimeout } from '@orkestrel/timeout'
 
 function withDeadline(parent: AbortSignal, ms: number) {
 	const timeout = createTimeout({ id: 'request-deadline', ms, signal: parent })
@@ -157,7 +157,7 @@ function withDeadline(parent: AbortSignal, ms: number) {
 ### Reuse a handle across deadlines
 
 ```ts
-import { createTimeout } from '@src/core'
+import { createTimeout } from '@orkestrel/timeout'
 
 const timeout = createTimeout({ ms: 100 })
 
