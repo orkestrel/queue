@@ -41,15 +41,21 @@ export const ENVIRONMENT_MODULE_BYTES = 8_388_608
 
 const WORKSPACE_ROOT = realpathSync.native(dirname(fileURLToPath(import.meta.url)))
 
+export function fileSystemPath(pathname: string): string {
+	if (!pathname.startsWith('/@fs/')) return pathname
+	const candidate = pathname.slice('/@fs/'.length)
+	// Vite URL normalization can collapse the leading slash of a POSIX absolute path.
+	return candidate.startsWith('/') || /^[A-Za-z]:[\\/]/.test(candidate)
+		? candidate
+		: `/${candidate}`
+}
+
 export function physicalPath(path: string): string {
 	const [pathWithoutQuery] = path.split('?')
-	const candidate = pathWithoutQuery?.startsWith('/@fs/')
-		? pathWithoutQuery.slice('/@fs/'.length)
-		: pathWithoutQuery
-	const physicalCandidate =
-		candidate !== undefined && /^file:/i.test(candidate) ? fileURLToPath(candidate) : candidate
+	const candidate = fileSystemPath(pathWithoutQuery ?? path)
+	const physicalCandidate = /^file:/i.test(candidate) ? fileURLToPath(candidate) : candidate
 	const absoluteCandidate =
-		physicalCandidate === undefined || physicalCandidate.length === 0
+		physicalCandidate.length === 0
 			? WORKSPACE_ROOT
 			: isAbsolute(physicalCandidate)
 				? physicalCandidate
@@ -106,7 +112,7 @@ export function isWorkspaceBoundaryModule(id: string): boolean {
 	const normalizedId = id.replaceAll('\\', '/')
 	const [path] = normalizedId.split(/[?#]/)
 	if (path === undefined) return false
-	let candidate = path.startsWith('/@fs/') ? path.slice('/@fs/'.length) : path
+	let candidate = fileSystemPath(path)
 	try {
 		if (/^file:/i.test(candidate)) candidate = fileURLToPath(candidate)
 	} catch {
@@ -130,10 +136,7 @@ export function isWorkspaceBoundaryModule(id: string): boolean {
 export function isOutsideWorkspacePath(path: string): boolean {
 	const [pathWithoutQuery] = path.split('?')
 	if (pathWithoutQuery === undefined) return false
-	const candidate = pathWithoutQuery.startsWith('/@fs/')
-		? pathWithoutQuery.slice('/@fs/'.length)
-		: pathWithoutQuery
-	return isAbsolute(candidate)
+	return isAbsolute(fileSystemPath(pathWithoutQuery))
 }
 
 export function containedPath(root: string, target: string): boolean {
@@ -801,17 +804,19 @@ export const policy = (config?: UserConfig): UserConfig =>
 	)
 
 export const guides = (config?: UserConfig): UserConfig =>
-	srcCore(
-		mergeConfig(
-			{
-				test: {
-					name: { label: 'guides', color: 'green' },
-					include: ['tests/guides/**/*.test.ts'],
-					exclude: ['tests/src/**/*.test.ts', 'tests/setup.test.ts'],
-				},
+	mergeConfig(
+		{
+			resolve,
+			test: {
+				name: { label: 'guides', color: 'green' },
+				include: ['tests/guides/**/*.test.ts'],
+				exclude: ['tests/src/**/*.test.ts', 'tests/app/**/*.test.ts', 'tests/setup.test.ts'],
+				setupFiles: ['./tests/setup.ts'],
+				environment: 'node',
+				browser: { enabled: false },
 			},
-			config ?? {},
-		),
+		},
+		config ?? {},
 	)
 
 export default defineConfig({
