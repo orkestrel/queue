@@ -21,9 +21,11 @@ import type { QueueStoreInterface, StoredEntry } from '../types.js'
  *
  * @example
  * ```ts
- * import { createMemoryQueueStore, stringShape } from '@src/core'
+ * import { stringShape } from '@orkestrel/contract'
+ * import { createMemoryDriver } from '@orkestrel/database'
+ * import { createDatabaseQueueStore } from '@orkestrel/queue'
  *
- * const store = createMemoryQueueStore(stringShape())
+ * const store = createDatabaseQueueStore(stringShape(), createMemoryDriver())
  * await store.save({ id: 'job-1', input: 'https://example.com', attempts: 0 })
  * const outstanding = await store.load() // readonly StoredEntry<string>[]
  * ```

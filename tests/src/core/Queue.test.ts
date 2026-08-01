@@ -2,7 +2,15 @@ import type { QueueEventMap, QueueExecution, QueueStoreInterface, StoredEntry } 
 import type { TestGateInterface } from '../../setup.js'
 import { describe, expect, it } from 'vitest'
 import { stringShape } from '@orkestrel/contract'
-import { createMemoryQueueStore, Queue } from '@src/core'
+import {
+	createMemoryQueueStore,
+	isQueueConcurrency,
+	isQueueError,
+	isQueueRetries,
+	isQueueSignal,
+	isQueueTimeout,
+	Queue,
+} from '@src/core'
 import {
 	createErrorRecorder,
 	createGate,
@@ -12,7 +20,7 @@ import {
 	waitForDelay,
 } from '../../setup.js'
 
-// src/core/workers/Queue.ts — the cooperative concurrent job engine. Real behaviour,
+// src/core/Queue.ts — the cooperative concurrent job engine. Real behaviour,
 // no mocks: handlers are gated on manually-settled promises (createGate) so ordering /
 // concurrency / pause are deterministic, and a real short Timeout drives the timeout
 // test. A recorder counts handler invocations (AGENTS §16). Beyond the per-feature
@@ -21,7 +29,7 @@ import {
 // failure shapes (sync throw vs async reject vs plain value vs non-Error throw),
 // per-entry vs queue-level timeout / retry interaction, rapid lifecycle churn
 // (pause/resume/clear/enqueue — count balanced, drains to 0), store-remove failures
-// under churn (best-effort remove can't wedge the in-memory drain), enqueue rejection
+// under churn (cleanup failures stay observable without wedging worker respawn), enqueue rejection
 // messages for every halted state, restore at scale + racing a concurrent same-id
 // enqueue (no double-run), and the wake-park under saturation (no lost wake / stuck
 // entry) — all with real hand-written failing stores, never behaviour mocks.
@@ -164,10 +172,11 @@ describe('Queue — abort', () => {
 		await waitForDelay(10)
 		expect(queue.active).toBe(1)
 
-		queue.abort(new Error('stop everything'))
+		const aborting = queue.abort(new Error('stop everything'))
 
 		await expect(waiting).rejects.toThrow('stop everything')
 		await expect(running).rejects.toBeDefined()
+		await aborting
 		// The in-flight attempt's signal fired, and it was NOT retried despite retries: 5.
 		expect(fired.count).toBe(1)
 		expect(attempts.count).toBe(1)
@@ -176,7 +185,7 @@ describe('Queue — abort', () => {
 
 	it('rejects new enqueues after an abort', async () => {
 		const queue = new Queue<number, number>({ handler: (input) => input })
-		queue.abort()
+		await queue.abort()
 		await expect(queue.enqueue(1)).rejects.toThrow('aborted')
 	})
 })
@@ -218,8 +227,9 @@ describe('Queue — clear', () => {
 		await waitForDelay(10)
 		expect(queue.active).toBe(1)
 
-		queue.clear()
+		const clearing = queue.clear()
 		await expect(dropped).rejects.toThrow('cleared')
+		await clearing
 		// The in-flight entry is untouched — it finishes when its gate opens.
 		expect(queue.active).toBe(1)
 		gate.resolve(99)
@@ -238,8 +248,9 @@ describe('Queue — stop / destroy', () => {
 		})
 		queue.pause()
 		const pending = queue.enqueue(1)
-		queue.stop()
+		const stopping = queue.stop()
 		await expect(pending).rejects.toThrow('stopped')
+		await stopping
 		expect(queue.stopped).toBe(true)
 		// A stopped queue runs nothing further.
 		await waitForDelay(10)
@@ -256,11 +267,12 @@ describe('Queue — stop / destroy', () => {
 		const waiting = queue.enqueue('pending')
 		await waitForDelay(10)
 
-		queue.destroy()
-		queue.destroy() // idempotent — no throw, no double-settle
+		const destroying = queue.destroy()
+		expect(queue.destroy()).toBe(destroying)
 
 		await expect(running).rejects.toBeDefined()
 		await expect(waiting).rejects.toBeDefined()
+		await destroying
 		expect(queue.stopped).toBe(true)
 	})
 })
@@ -395,7 +407,7 @@ describe('Queue — durability: restore (restart simulation)', () => {
 
 		// Queue A: persist three entries but never run them — paused so its parked workers
 		// never dequeue, leaving the rows durably saved in the shared store. (We must NOT
-		// stop / drain A, since a lifecycle drain would fire-and-forget remove the very rows
+		// stop / drain A, since a lifecycle drain would remove the very rows
 		// B is meant to restore; a paused A simply holds them.)
 		const a = new Queue<string, string>({ store, handler: (input) => input })
 		a.pause()
@@ -486,10 +498,9 @@ describe('Queue — durability: lifecycle drains remove rows', () => {
 		// Both are persisted; one is in flight, one is pending.
 		expect(await store.load()).toHaveLength(2)
 
-		queue.clear()
+		const clearing = queue.clear()
 		await expect(dropped).rejects.toThrow('cleared')
-		// The fire-and-forget per-entry remove needs a turn to land.
-		await waitForDelay(10)
+		await clearing
 		// The pending row was dropped; the in-flight one is still mirrored until it settles.
 		const afterClear = await store.load()
 		expect(afterClear).toHaveLength(1)
@@ -515,10 +526,10 @@ describe('Queue — durability: lifecycle drains remove rows', () => {
 		await waitForDelay(10)
 		expect(await store.load()).toHaveLength(2)
 
-		queue.abort(new Error('stop'))
+		const aborting = queue.abort(new Error('stop'))
 		await expect(waiting).rejects.toThrow('stop')
 		await expect(running).rejects.toBeDefined()
-		await waitForDelay(10)
+		await aborting
 		// Both rows are gone: the pending one drained, the in-flight one removed on its
 		// (abort-rejected) settle.
 		expect(await store.load()).toEqual([])
@@ -617,6 +628,8 @@ describe('Queue — per-entry signal abort', () => {
 		await expect(aborted).rejects.toThrow('entry gave up')
 		expect(fired.count).toBe(1)
 		expect(attempts.calls).toEqual([['a']])
+		expect(queue.active).toBe(0)
+		expect(queue.count).toBe(0)
 		// The queue itself is untouched — a fresh entry still runs to completion.
 		expect(queue.stopped).toBe(false)
 		await expect(queue.enqueue('b')).resolves.toBeUndefined()
@@ -748,9 +761,10 @@ describe('Queue — restore racing abort/destroy', () => {
 		const restoring = queue.restore()
 		await waitForDelay(10)
 		// Abort the queue while load() is still in flight, THEN let load() resolve with rows.
-		queue.abort(new Error('shutting down mid-load'))
+		const aborting = queue.abort(new Error('shutting down mid-load'))
 		loadGate.resolve([{ id: 'late', input: 'payload', attempts: 0 }])
 		await restoring
+		await aborting
 		await waitForDelay(10)
 
 		// The post-load halt re-check fired: no entry was launched, and — the load-bearing
@@ -809,10 +823,11 @@ describe('Queue — start idempotency and stop/start resume', () => {
 
 		// stop() ends the loops and rejects the PENDING entry; the in-flight one settles on
 		// its own once its gate opens.
-		queue.stop()
+		const stopping = queue.stop()
 		await expect(pending).rejects.toThrow('stopped')
 		gate.resolve(1)
 		await expect(running).resolves.toBe(1)
+		await stopping
 		expect(queue.stopped).toBe(true)
 
 		// start() revives the loops after the stop; a fresh enqueue now runs to completion.
@@ -1064,8 +1079,9 @@ describe('Queue — rapid lifecycle churn keeps accounting balanced', () => {
 		const wave2 = Array.from({ length: 10 }, (_unused, index) => queue.enqueue(100 + index))
 		expect(queue.count).toBe(20) // all 20 pending behind the pause
 
-		queue.clear() // drops all 20 pending
+		const clearing = queue.clear() // drops all 20 pending
 		const cleared = await Promise.allSettled([...wave1, ...wave2])
+		await clearing
 		expect(cleared.every((result) => result.status === 'rejected')).toBe(true)
 		expect(queue.count).toBe(0) // accounting balanced right after the clear
 		expect(ran.count).toBe(0) // nothing ran — they were cleared before resume
@@ -1100,17 +1116,14 @@ describe('Queue — rapid lifecycle churn keeps accounting balanced', () => {
 
 // ── Store-hook failures under churn (#live / count / drain stay intact) ───────
 //
-// PRODUCTION GAP: a store's `save` / `remove` are best-effort AFTER accept (per-attempt
-// save) and on every settle / drain (remove). A store that throws on `remove` under
-// heavy churn must NOT corrupt the in-memory `#live` / `count` (which are authoritative)
-// nor wedge the drain — every entry must still settle and the queue must still drain to
-// count 0. Uses a real, hand-written failing QueueStoreInterface (not a behaviour mock).
+// Per-attempt count saves remain best-effort, but removals are observable cleanup. A store
+// that rejects `remove` must reject the affected result/lifecycle promise and retain the
+// live id reservation so a possibly-still-present row cannot be overwritten.
 
 describe('Queue — store remove failures under churn', () => {
-	it('keeps draining to count 0 when the store rejects every remove', async () => {
+	it('surfaces every failed completion cleanup and retains each live reservation', async () => {
 		// A real store that accepts saves (so entries are accepted) but ALWAYS throws on
-		// remove — proving the settle/drain remove is genuinely best-effort and the
-		// in-memory state is authoritative even when persistence cleanup fails repeatedly.
+		// remove — proving every durable cleanup failure is surfaced and reservations stay held.
 		const removes = createRecorder<[string]>()
 		const store: QueueStoreInterface<string> = {
 			async save() {},
@@ -1135,15 +1148,22 @@ describe('Queue — store remove failures under churn', () => {
 
 		// A mix of completing + cleared entries while remove fails on every settle / drain.
 		const completing = Array.from({ length: 12 }, (_unused, index) => queue.enqueue(`run-${index}`))
-		await Promise.all(completing)
+		const settled = await Promise.allSettled(completing)
 		// Despite every remove throwing, all entries ran and settled.
 		expect(ran.count).toBe(12)
-		// The remove was ATTEMPTED for each settled entry (best-effort, swallowed).
+		expect(
+			settled.every(
+				(result) =>
+					result.status === 'rejected' &&
+					isQueueError(result.reason) &&
+					result.reason.code === 'cleanup',
+			),
+		).toBe(true)
+		// Removal was attempted for every settled entry.
 		expect(removes.count).toBe(12)
 		// In-memory accounting is authoritative and balanced — count back to 0, queue alive.
-		expect(queue.count).toBe(0)
+		expect(queue.count).toBe(12)
 		expect(queue.active).toBe(0)
-		await expect(queue.enqueue('after')).resolves.toBe('after')
 	})
 
 	it('clears pending rows in-memory even when the store rejects the drain remove', async () => {
@@ -1173,14 +1193,18 @@ describe('Queue — store remove failures under churn', () => {
 		expect(queue.count).toBe(2)
 
 		// clear() drops the pending one in-memory and fires a (failing) remove for it.
-		queue.clear()
+		const clearing = queue.clear()
 		await expect(dropped).rejects.toThrow('cleared')
-		await waitForDelay(5)
-		// The pending entry left the in-memory queue regardless of the remove failure.
-		expect(queue.count).toBe(1) // only the in-flight one remains
+		await expect(clearing).rejects.toSatisfy(
+			(error: unknown) => isQueueError(error) && error.code === 'cleanup',
+		)
+		// Failed cleanup keeps both ids reserved because either durable row may remain.
+		expect(queue.count).toBe(2)
 		gate.resolve('done')
-		await expect(running).resolves.toBe('done')
-		expect(queue.count).toBe(0)
+		await expect(running).rejects.toSatisfy(
+			(error: unknown) => isQueueError(error) && error.code === 'cleanup',
+		)
+		expect(queue.count).toBe(2)
 	})
 })
 
@@ -1193,13 +1217,13 @@ describe('Queue — store remove failures under churn', () => {
 describe('Queue — enqueue onto a halted queue rejects with the right reason', () => {
 	it('rejects with "stopped" after stop()', async () => {
 		const queue = new Queue<number, number>({ handler: (input) => input })
-		queue.stop()
+		await queue.stop()
 		await expect(queue.enqueue(1)).rejects.toThrow('stopped')
 	})
 
 	it('rejects with "destroyed" after destroy()', async () => {
 		const queue = new Queue<number, number>({ handler: (input) => input })
-		queue.destroy()
+		await queue.destroy()
 		await expect(queue.enqueue(1)).rejects.toThrow('destroyed')
 	})
 
@@ -1218,7 +1242,7 @@ describe('Queue — enqueue onto a halted queue rejects with the right reason', 
 			async clear() {},
 		}
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
-		queue.destroy()
+		await queue.destroy()
 		await expect(queue.enqueue('x')).rejects.toThrow('destroyed')
 		expect(saves.count).toBe(0) // the store was never asked to save a doomed entry
 	})
@@ -1420,11 +1444,16 @@ describe('Queue — emitter (push observation surface)', () => {
 		const waiting = queue.enqueue('pending', { id: 'b' })
 		await waitForDelay(10)
 		const reason = new Error('stop everything')
-		queue.abort(reason)
+		const aborting = queue.abort(reason)
 		await expect(waiting).rejects.toThrow('stop everything')
 		await expect(running).rejects.toBeDefined()
+		await aborting
 		// The queue-level `abort` fired exactly once, carrying the reason.
-		expect(events.abort.calls).toEqual([[reason]])
+		const emitted = events.abort.calls[0]?.[0]
+		expect(isQueueError(emitted)).toBe(true)
+		if (!isQueueError(emitted)) throw new Error('expected a QueueError abort event')
+		expect(emitted.code).toBe('aborted')
+		expect(emitted.cause).toBe(reason)
 	})
 
 	it('wires initial listeners from the `on` option at construction', async () => {
@@ -1520,5 +1549,893 @@ describe('Queue — emitter (push observation surface)', () => {
 		expect(ran.calls).toEqual([[5]])
 		expect(errors.calls).toEqual([[expect.any(Error), 'enqueue']])
 		expect(queue.active).toBe(0)
+	})
+})
+
+describe('Queue numeric contracts', () => {
+	it('narrows QueueError totally for ordinary and hostile values', () => {
+		const hostile = new Proxy(
+			{},
+			{
+				getPrototypeOf() {
+					throw new Error('hostile prototype')
+				},
+			},
+		)
+		expect(isQueueError(hostile)).toBe(false)
+		expect(isQueueError(new Error('ordinary'))).toBe(false)
+	})
+
+	it('throws a coded error for every invalid constructor numeric option', () => {
+		const integers: readonly number[] = [
+			Number.NaN,
+			Infinity,
+			Number.NEGATIVE_INFINITY,
+			-1,
+			1.5,
+			Number.MAX_SAFE_INTEGER + 1,
+		]
+		for (const concurrency of [0, ...integers]) {
+			expect(() => new Queue({ concurrency, handler: (input: number) => input })).toThrow(
+				expect.objectContaining({ code: 'invalid' }),
+			)
+		}
+		for (const retries of integers) {
+			expect(() => new Queue({ retries, handler: (input: number) => input })).toThrow(
+				expect.objectContaining({ code: 'invalid' }),
+			)
+		}
+		for (const timeout of [Number.NaN, Infinity, Number.NEGATIVE_INFINITY, -1, 2_147_483_648]) {
+			expect(() => new Queue({ timeout, handler: (input: number) => input })).toThrow(
+				expect.objectContaining({ code: 'invalid' }),
+			)
+		}
+		const queue = new Queue({
+			concurrency: Number.MAX_SAFE_INTEGER,
+			timeout: 2_147_483_647,
+			handler: (input: number) => input,
+		})
+		expect(queue.active).toBe(0)
+		expect(queue.count).toBe(0)
+	})
+
+	it('throws immediately for invalid per-entry retries and timeout', () => {
+		const queue = new Queue<number, number>({ handler: (input) => input })
+		expect(() => queue.enqueue(1, { retries: Number.NaN })).toThrow(
+			expect.objectContaining({ code: 'invalid' }),
+		)
+		expect(() => queue.enqueue(1, { retries: 0.5 })).toThrow(
+			expect.objectContaining({ code: 'invalid' }),
+		)
+		expect(() => queue.enqueue(1, { timeout: Infinity })).toThrow(
+			expect.objectContaining({ code: 'invalid' }),
+		)
+		expect(() => queue.enqueue(1, { timeout: -1 })).toThrow(
+			expect.objectContaining({ code: 'invalid' }),
+		)
+		expect(() => queue.enqueue(1, { timeout: 2_147_483_648 })).toThrow(
+			expect.objectContaining({ code: 'invalid' }),
+		)
+	})
+
+	it('runs one entry with maximum safe concurrency without preallocating workers', async () => {
+		const queue = new Queue<number, number>({
+			concurrency: Number.MAX_SAFE_INTEGER,
+			handler: (input) => input + 1,
+		})
+		await expect(queue.enqueue(1)).resolves.toBe(2)
+		expect(queue.active).toBe(0)
+		expect(queue.count).toBe(0)
+	})
+})
+
+describe('Queue serialized durable admission', () => {
+	it('reserves duplicate ids synchronously without overwriting the first row', async () => {
+		const store = createMemoryQueueStore(stringShape())
+		const queue = new Queue<string, string>({ store, handler: (input) => input })
+		queue.pause()
+		const first = queue.enqueue('first', { id: 'shared' })
+		void first.catch(() => {})
+		await expect(queue.enqueue('second', { id: 'shared' })).rejects.toSatisfy(
+			(error: unknown) => isQueueError(error) && error.code === 'duplicate',
+		)
+		await waitForDelay(0)
+		expect(await store.load()).toEqual([{ id: 'shared', input: 'first', attempts: 0 }])
+		const clearing = queue.clear()
+		await expect(first).rejects.toThrow('cleared')
+		await clearing
+	})
+
+	it('preserves enqueue order even when the first save is delayed', async () => {
+		const first = createGate<void>()
+		const saves = createRecorder<[number]>()
+		const order = createRecorder<[number]>()
+		const entries = new Map<string, StoredEntry<number>>()
+		const store: QueueStoreInterface<number> = {
+			async save(entry) {
+				saves.handler(entry.input)
+				if (entry.input === 1) await first.promise
+				entries.set(entry.id, entry)
+			},
+			async remove(id) {
+				entries.delete(id)
+			},
+			async load() {
+				return [...entries.values()]
+			},
+			async clear() {
+				entries.clear()
+			},
+		}
+		const queue = new Queue<number, number>({
+			store,
+			handler: (input) => {
+				order.handler(input)
+				return input
+			},
+		})
+		const one = queue.enqueue(1, { id: 'one' })
+		const two = queue.enqueue(2, { id: 'two' })
+		await waitForDelay(0)
+		expect(saves.calls).toEqual([[1]])
+		first.resolve()
+		await expect(Promise.all([one, two])).resolves.toEqual([1, 2])
+		expect(saves.calls).toEqual([[1], [2]])
+		expect(order.calls).toEqual([[1], [2]])
+	})
+
+	it('continues with the next admission after a save failure', async () => {
+		const saves = createRecorder<[string]>()
+		const store: QueueStoreInterface<string> = {
+			async save(entry) {
+				saves.handler(entry.input)
+				if (entry.input === 'bad') throw new Error('offline')
+			},
+			async remove() {},
+			async load() {
+				return []
+			},
+			async clear() {},
+		}
+		const queue = new Queue<string, string>({ store, handler: (input) => input })
+		const bad = queue.enqueue('bad', { id: 'bad' })
+		const good = queue.enqueue('good', { id: 'good' })
+		await expect(bad).rejects.toSatisfy(
+			(error: unknown) => isQueueError(error) && error.code === 'store',
+		)
+		await expect(good).resolves.toBe('good')
+		expect(saves.calls).toEqual([['bad'], ['good']])
+	})
+})
+
+describe('Queue coordinated lifecycle', () => {
+	it('makes progress after stop, start, and enqueue in the same turn', async () => {
+		const queue = new Queue<number, number>({ handler: (input) => input + 1 })
+		const stopping = queue.stop()
+		queue.start()
+		const result = queue.enqueue(1)
+		await stopping
+		await expect(result).resolves.toBe(2)
+	})
+
+	it('rejects a stale admission stopped before its save completes', async () => {
+		const save = createGate<void>()
+		const removals = createRecorder<[string]>()
+		const store: QueueStoreInterface<string> = {
+			async save() {
+				await save.promise
+			},
+			async remove(id) {
+				removals.handler(id)
+			},
+			async load() {
+				return []
+			},
+			async clear() {},
+		}
+		const queue = new Queue<string, string>({ store, handler: (input) => input })
+		const stale = queue.enqueue('old', { id: 'old' })
+		const stopping = queue.stop()
+		queue.start()
+		const fresh = queue.enqueue('new', { id: 'new' })
+		await expect(stale).rejects.toThrow('stopped')
+		save.resolve()
+		await stopping
+		await expect(fresh).resolves.toBe('new')
+		expect(removals.calls.some(([id]) => id === 'old')).toBe(true)
+	})
+
+	it('emits one drain for a pending-only transition to idle', async () => {
+		const queue = new Queue<number, number>({ handler: (input) => input })
+		queue.pause()
+		const events = recordEmitterEvents<QueueEventMap<number>, 'drain'>(queue.emitter, ['drain'])
+		const pending = queue.enqueue(1)
+		const clearing = queue.clear()
+		await expect(pending).rejects.toThrow('cleared')
+		await clearing
+		expect(events.drain.count).toBe(1)
+		await queue.clear()
+		expect(events.drain.count).toBe(1)
+	})
+
+	it('destroys the emitter last and returns the same idempotent promise', async () => {
+		const removal = createGate<void>()
+		const store: QueueStoreInterface<string> = {
+			async save() {},
+			async remove() {
+				await removal.promise
+			},
+			async load() {
+				return []
+			},
+			async clear() {},
+		}
+		const queue = new Queue<string, string>({ store, handler: (input) => input })
+		queue.pause()
+		const pending = queue.enqueue('held')
+		void pending.catch(() => {})
+		await waitForDelay(0)
+		const destroying = queue.destroy()
+		expect(queue.destroy()).toBe(destroying)
+		expect(queue.emitter.destroyed).toBe(false)
+		removal.resolve()
+		await destroying
+		expect(queue.emitter.destroyed).toBe(true)
+	})
+})
+
+describe('Queue — public guards and runtime ids', () => {
+	it('exposes total queue numeric guards at their exact boundaries', () => {
+		expect(isQueueConcurrency(1)).toBe(true)
+		expect(isQueueConcurrency(0)).toBe(false)
+		expect(isQueueConcurrency(Number.MAX_SAFE_INTEGER)).toBe(true)
+		expect(isQueueConcurrency(Number.MAX_SAFE_INTEGER + 1)).toBe(false)
+		expect(isQueueRetries(0)).toBe(true)
+		expect(isQueueRetries(-0)).toBe(true)
+		expect(isQueueRetries(-1)).toBe(false)
+		expect(isQueueRetries(0.5)).toBe(false)
+		expect(isQueueTimeout(0)).toBe(true)
+		expect(isQueueTimeout(-0)).toBe(true)
+		expect(isQueueTimeout(2_147_483_647)).toBe(true)
+		expect(isQueueTimeout(2_147_483_648)).toBe(false)
+		expect(isQueueTimeout(Infinity)).toBe(false)
+		expect(isQueueTimeout(Number.NaN)).toBe(false)
+	})
+
+	it('narrows only native abort signals without throwing on hostile values', () => {
+		const controller = new AbortController()
+		const hostile = new Proxy(
+			{},
+			{
+				getPrototypeOf() {
+					throw new Error('hostile prototype')
+				},
+			},
+		)
+		expect(isQueueSignal(controller.signal)).toBe(true)
+		expect(isQueueSignal({})).toBe(false)
+		expect(isQueueSignal(hostile)).toBe(false)
+	})
+
+	it('throws a coded invalid-id error before reserving or running without a store', () => {
+		const ran = createRecorder<[]>()
+		const queue = new Queue<number, number>({
+			handler: (input) => {
+				ran.handler()
+				return input
+			},
+		})
+		expect(() => Reflect.apply(queue.enqueue, queue, [1, { id: 42 }])).toThrow(
+			expect.objectContaining({
+				code: 'invalid',
+				context: { option: 'id', value: 42 },
+			}),
+		)
+		expect(queue.count).toBe(0)
+		expect(ran.count).toBe(0)
+	})
+
+	it('throws a coded invalid-id error before touching a store', () => {
+		const saves = createRecorder<[]>()
+		const store: QueueStoreInterface<number> = {
+			async save() {
+				saves.handler()
+			},
+			async remove() {},
+			async load() {
+				return []
+			},
+			async clear() {},
+		}
+		const queue = new Queue<number, number>({ store, handler: (input) => input })
+		expect(() => Reflect.apply(queue.enqueue, queue, [1, { id: null }])).toThrow(
+			expect.objectContaining({
+				code: 'invalid',
+				context: { option: 'id', value: null },
+			}),
+		)
+		expect(queue.count).toBe(0)
+		expect(saves.count).toBe(0)
+	})
+
+	it('snapshots every supplied enqueue option exactly once', async () => {
+		const reads = createRecorder<[string]>()
+		const controller = new AbortController()
+		const options = {
+			get id() {
+				reads.handler('id')
+				return 'snapshotted'
+			},
+			get retries() {
+				reads.handler('retries')
+				return 0
+			},
+			get timeout() {
+				reads.handler('timeout')
+				return 0
+			},
+			get signal() {
+				reads.handler('signal')
+				return controller.signal
+			},
+		}
+		const queue = new Queue<number, number>({ handler: (input) => input })
+		await expect(Reflect.apply(queue.enqueue, queue, [1, options])).resolves.toBe(1)
+		expect(reads.calls).toEqual([['id'], ['retries'], ['timeout'], ['signal']])
+	})
+
+	it('contains hostile option access before reserving or running', () => {
+		const ran = createRecorder<[]>()
+		const options = Object.defineProperty({}, 'id', {
+			get() {
+				throw new Error('hostile id getter')
+			},
+		})
+		const queue = new Queue<number, number>({
+			handler: (input) => {
+				ran.handler()
+				return input
+			},
+		})
+		expect(() => Reflect.apply(queue.enqueue, queue, [1, options])).toThrow(
+			expect.objectContaining({ code: 'invalid', context: { option: 'id' } }),
+		)
+		expect(queue.count).toBe(0)
+		expect(queue.active).toBe(0)
+		expect(ran.count).toBe(0)
+	})
+
+	it('rejects a non-signal value synchronously without reserving work', () => {
+		const ran = createRecorder<[]>()
+		const queue = new Queue<number, number>({
+			handler: (input) => {
+				ran.handler()
+				return input
+			},
+		})
+		expect(() => Reflect.apply(queue.enqueue, queue, [1, { signal: {} }])).toThrow(
+			expect.objectContaining({ code: 'invalid', context: { option: 'signal', value: {} } }),
+		)
+		expect(queue.count).toBe(0)
+		expect(queue.active).toBe(0)
+		expect(ran.count).toBe(0)
+	})
+})
+
+describe('Queue — reentrant lifecycle barriers', () => {
+	it('preinstalls the abort and destroy barriers before abort listeners run', async () => {
+		const reentrant: Promise<void>[] = []
+		const queue = new Queue<number, number>({ handler: (input) => input })
+		queue.emitter.on('abort', () => {
+			reentrant.push(queue.abort())
+			reentrant.push(queue.destroy())
+		})
+
+		const aborting = queue.abort()
+		const nestedAbort = requireElement(reentrant, 0)
+		const nestedDestroy = requireElement(reentrant, 1)
+		expect(nestedAbort).toBe(aborting)
+		expect(queue.abort()).toBe(aborting)
+		expect(queue.destroy()).toBe(nestedDestroy)
+		await expect(aborting).resolves.toBeUndefined()
+		await expect(nestedDestroy).resolves.toBeUndefined()
+	})
+
+	it('returns the installed stop barrier from a reentrant drain listener', async () => {
+		const reentrant: Promise<void>[] = []
+		const queue = new Queue<number, number>({ handler: (input) => input })
+		queue.pause()
+		queue.emitter.on('drain', () => reentrant.push(queue.stop()))
+		const pending = queue.enqueue(1)
+		const stopping = queue.stop()
+
+		await expect(pending).rejects.toThrow('stopped')
+		await stopping
+		expect(requireElement(reentrant, 0)).toBe(stopping)
+		expect(queue.stop()).toBe(stopping)
+	})
+
+	it('returns the installed abort barrier from a reentrant drain listener', async () => {
+		const reentrant: Promise<void>[] = []
+		const queue = new Queue<number, number>({ handler: (input) => input })
+		queue.pause()
+		queue.emitter.on('drain', () => reentrant.push(queue.abort()))
+		const pending = queue.enqueue(1)
+		const aborting = queue.abort()
+
+		await expect(pending).rejects.toBeDefined()
+		await aborting
+		expect(requireElement(reentrant, 0)).toBe(aborting)
+		expect(queue.abort()).toBe(aborting)
+	})
+
+	it('returns the installed destroy barrier from a reentrant drain listener', async () => {
+		const reentrant: Promise<void>[] = []
+		const queue = new Queue<number, number>({ handler: (input) => input })
+		queue.pause()
+		queue.emitter.on('drain', () => reentrant.push(queue.destroy()))
+		const pending = queue.enqueue(1)
+		const destroying = queue.destroy()
+
+		await expect(pending).rejects.toBeDefined()
+		await destroying
+		expect(requireElement(reentrant, 0)).toBe(destroying)
+		expect(queue.destroy()).toBe(destroying)
+	})
+})
+
+describe('Queue — atomic claims and stale restore generations', () => {
+	it('claims an entry as active before same-turn stop and waits for it to settle', async () => {
+		const gate = createGate<number>()
+		const queue = new Queue<number, number>({ handler: () => gate.promise })
+		const running = queue.enqueue(1)
+		expect(queue.active).toBe(1)
+		const stopping = queue.stop()
+		expect(queue.active).toBe(1)
+		gate.resolve(2)
+		await expect(running).resolves.toBe(2)
+		await expect(stopping).resolves.toBeUndefined()
+		expect(queue.active).toBe(0)
+		expect(queue.count).toBe(0)
+	})
+
+	it('leaves a same-turn claimed entry active across clear', async () => {
+		const gate = createGate<number>()
+		const queue = new Queue<number, number>({ handler: () => gate.promise })
+		const running = queue.enqueue(1)
+		expect(queue.active).toBe(1)
+		await expect(queue.clear()).resolves.toBeUndefined()
+		expect(queue.active).toBe(1)
+		expect(queue.count).toBe(1)
+		gate.resolve(2)
+		await expect(running).resolves.toBe(2)
+	})
+
+	it('ignores a restore load that completes after stop and start change generation', async () => {
+		const load = createGate<readonly StoredEntry<string>[]>()
+		const handled = createRecorder<[string]>()
+		const enqueued = createRecorder<[string]>()
+		const store: QueueStoreInterface<string> = {
+			async save() {},
+			async remove() {},
+			async load() {
+				return load.promise
+			},
+			async clear() {},
+		}
+		const queue = new Queue<string, string>({
+			store,
+			handler: (input) => {
+				handled.handler(input)
+				return input
+			},
+		})
+		queue.emitter.on('enqueue', enqueued.handler)
+		const restoring = queue.restore()
+		const stopping = queue.stop()
+		queue.start()
+		load.resolve([{ id: 'stale', input: 'old', attempts: 0 }])
+
+		await stopping
+		await restoring
+		await waitForDelay(0)
+		expect(enqueued.count).toBe(0)
+		expect(handled.count).toBe(0)
+		expect(queue.count).toBe(0)
+	})
+})
+
+describe('Queue — exclusive cleanup ownership and lifecycle visibility', () => {
+	it('shares overlapping cleanup, retries a failure, then safely reuses the id', async () => {
+		const first = createGate<void>()
+		const removes = createRecorder<[string]>()
+		let fail = true
+		const store: QueueStoreInterface<string> = {
+			async save() {},
+			async remove(id) {
+				removes.handler(id)
+				if (removes.count === 1) await first.promise
+				if (fail) throw new Error('first cleanup failed')
+			},
+			async load() {
+				return []
+			},
+			async clear() {},
+		}
+		const queue = new Queue<string, string>({ store, handler: (input) => input })
+		queue.pause()
+		const old = queue.enqueue('old', { id: 'shared' })
+		await waitForDelay(0)
+		const clearing = queue.clear()
+		const stopping = queue.stop()
+		await expect(old).rejects.toThrow('cleared')
+		expect(removes.count).toBe(1)
+		first.resolve()
+		await expect(clearing).rejects.toSatisfy(
+			(error: unknown) => isQueueError(error) && error.code === 'cleanup',
+		)
+		await expect(stopping).rejects.toSatisfy(
+			(error: unknown) => isQueueError(error) && error.code === 'cleanup',
+		)
+		expect(removes.count).toBe(1)
+		expect(queue.count).toBe(1)
+
+		fail = false
+		queue.start()
+		await expect(queue.clear()).resolves.toBeUndefined()
+		expect(removes.count).toBe(2)
+		expect(queue.count).toBe(0)
+		const fresh = queue.enqueue('fresh', { id: 'shared' })
+		await waitForDelay(0)
+		await expect(queue.clear()).resolves.toBeUndefined()
+		await expect(fresh).rejects.toThrow('cleared')
+		expect(removes.count).toBe(3)
+		expect(queue.count).toBe(0)
+	})
+
+	it('propagates active cleanup failure through stop and the entry result', async () => {
+		const gate = createGate<string>()
+		const store: QueueStoreInterface<string> = {
+			async save() {},
+			async remove() {
+				throw new Error('remove failed during stop')
+			},
+			async load() {
+				return []
+			},
+			async clear() {},
+		}
+		const queue = new Queue<string, string>({ store, handler: () => gate.promise })
+		const running = queue.enqueue('active')
+		await waitForDelay(0)
+		const stopping = queue.stop()
+		gate.resolve('done')
+		await expect(running).rejects.toSatisfy(
+			(error: unknown) => isQueueError(error) && error.code === 'cleanup',
+		)
+		await expect(stopping).rejects.toSatisfy(
+			(error: unknown) => isQueueError(error) && error.code === 'cleanup',
+		)
+	})
+
+	it('propagates active cleanup failure through abort and the entry result', async () => {
+		const gate = createGate<string>()
+		const store: QueueStoreInterface<string> = {
+			async save() {},
+			async remove() {
+				throw new Error('remove failed during abort')
+			},
+			async load() {
+				return []
+			},
+			async clear() {},
+		}
+		const queue = new Queue<string, string>({ store, handler: () => gate.promise })
+		const running = queue.enqueue('active')
+		await waitForDelay(0)
+		const aborting = queue.abort()
+		await expect(running).rejects.toSatisfy(
+			(error: unknown) => isQueueError(error) && error.code === 'cleanup',
+		)
+		await expect(aborting).rejects.toSatisfy(
+			(error: unknown) => isQueueError(error) && error.code === 'cleanup',
+		)
+	})
+
+	it('respawns after a running cleanup rejection and stop retries the orphan', async () => {
+		const handled = createRecorder<[string]>()
+		const removes = createRecorder<[string]>()
+		const store: QueueStoreInterface<string> = {
+			async save() {},
+			async remove(id) {
+				removes.handler(id)
+				if (id === 'first' && removes.count === 1) throw new Error('transient remove failure')
+			},
+			async load() {
+				return []
+			},
+			async clear() {},
+		}
+		const queue = new Queue<string, string>({
+			store,
+			handler: (input) => {
+				handled.handler(input)
+				return input
+			},
+		})
+		await expect(queue.enqueue('one', { id: 'first' })).rejects.toSatisfy(
+			(error: unknown) => isQueueError(error) && error.code === 'cleanup',
+		)
+		await expect(queue.enqueue('two', { id: 'second' })).resolves.toBe('two')
+		expect(handled.calls).toEqual([['one'], ['two']])
+		expect(queue.count).toBe(1)
+		await expect(queue.stop()).resolves.toBeUndefined()
+		expect(queue.count).toBe(0)
+		expect(removes.calls).toEqual([['first'], ['second'], ['first']])
+	})
+})
+
+describe('Queue — active cleanup and handler failure isolation', () => {
+	it('clear neither waits for nor inherits active cleanup failure', async () => {
+		const removal = createGate<void>()
+		const removes = createRecorder<[]>()
+		let fail = true
+		const store: QueueStoreInterface<string> = {
+			async save() {},
+			async remove() {
+				removes.handler()
+				if (removes.count === 1) await removal.promise
+				if (fail) throw new Error('active removal failed')
+			},
+			async load() {
+				return []
+			},
+			async clear() {},
+		}
+		const queue = new Queue<string, string>({ store, handler: (input) => input })
+		const running = queue.enqueue('active')
+		void running.catch(() => {})
+		await waitForDelay(0)
+		expect(removes.count).toBe(1)
+
+		await expect(queue.clear()).resolves.toBeUndefined()
+		expect(queue.active).toBe(1)
+		expect(queue.count).toBe(1)
+
+		removal.resolve()
+		await expect(running).rejects.toSatisfy(
+			(error: unknown) => isQueueError(error) && error.code === 'cleanup',
+		)
+		expect(queue.active).toBe(0)
+		expect(queue.count).toBe(1)
+
+		fail = false
+		await expect(queue.clear()).resolves.toBeUndefined()
+		expect(queue.count).toBe(0)
+	})
+
+	it('clear excludes a newly orphaned token while its exact claim is still active', async () => {
+		const removal = Promise.withResolvers<void>()
+		const started = Promise.withResolvers<void>()
+		const removes = createRecorder<[]>()
+		const boundary = createRecorder<[number]>()
+		const store: QueueStoreInterface<string> = {
+			save() {
+				return Promise.resolve()
+			},
+			remove() {
+				removes.handler()
+				if (removes.count === 1) {
+					started.resolve()
+					return removal.promise
+				}
+				return Promise.resolve()
+			},
+			load() {
+				return Promise.resolve([])
+			},
+			clear() {
+				return Promise.resolve()
+			},
+		}
+		const queue = new Queue<string, string>({ store, handler: (input) => input })
+		const running = queue.enqueue('active')
+		const failure = running.catch((error: unknown) => error)
+		await started.promise
+		let clearing: Promise<void> | undefined
+		const reaction = removal.promise.catch(() => {
+			boundary.handler(queue.active)
+			clearing = queue.clear()
+		})
+
+		removal.reject(new Error('first removal failed'))
+		await reaction
+		if (clearing === undefined) throw new Error('expected clear at the rejection boundary')
+		await expect(clearing).resolves.toBeUndefined()
+		expect(boundary.calls).toEqual([[1]])
+		expect(removes.count).toBe(1)
+
+		const error = await failure
+		expect(error).toSatisfy((caught: unknown) => isQueueError(caught) && caught.code === 'cleanup')
+		expect(queue.active).toBe(0)
+		expect(queue.count).toBe(1)
+
+		await expect(queue.clear()).resolves.toBeUndefined()
+		expect(removes.count).toBe(2)
+		expect(queue.count).toBe(0)
+	})
+
+	it('normalizes a hostile non-Error rejection without bypassing retries or stop', async () => {
+		const reason = Object.setPrototypeOf({ rejection: 'hostile' }, null)
+		const attempts = createRecorder<[]>()
+		const queue = new Queue<undefined, string>({
+			retries: 2,
+			handler: () => {
+				attempts.handler()
+				throw reason
+			},
+		})
+		const running = queue.enqueue(undefined)
+		const failure = running.catch((error: unknown) => error)
+		const stopping = queue.stop()
+		const error = await failure
+		await expect(stopping).resolves.toBeUndefined()
+		expect(error).toBeInstanceOf(Error)
+		if (!(error instanceof Error)) throw new Error('expected a normalized Error')
+		expect(error.message).toBe('object')
+		expect(error.cause).toBe(reason)
+		expect(attempts.count).toBe(3)
+		expect(queue.active).toBe(0)
+		expect(queue.count).toBe(0)
+	})
+})
+
+describe('Queue — atomic restore validation', () => {
+	it('contains a non-iterable load result as a coded store failure', async () => {
+		const loaded = new Proxy([{ id: 'valid', input: 'payload', attempts: 0 }], {
+			get(target, property, receiver) {
+				if (property === Symbol.iterator) throw new Error('hostile iterator')
+				return Reflect.get(target, property, receiver)
+			},
+		})
+		const store: QueueStoreInterface<string> = {
+			async save() {},
+			async remove() {},
+			async load() {
+				return loaded
+			},
+			async clear() {},
+		}
+		const queue = new Queue<string, string>({ store, handler: (input) => input })
+		await expect(queue.restore()).rejects.toSatisfy(
+			(error: unknown) =>
+				isQueueError(error) && error.code === 'store' && error.context?.operation === 'load',
+		)
+		expect(queue.count).toBe(0)
+		expect(queue.active).toBe(0)
+	})
+
+	it('validates every loaded entry before reserving the first one', async () => {
+		const hostile = new Proxy(
+			{ id: 'hostile', input: 'late', attempts: 0 },
+			{
+				get(target, property, receiver) {
+					if (property === 'attempts') throw new Error('hostile attempts getter')
+					return Reflect.get(target, property, receiver)
+				},
+			},
+		)
+		const store: QueueStoreInterface<string> = {
+			async save() {},
+			async remove() {},
+			async load() {
+				return [{ id: 'valid', input: 'first', attempts: 0 }, hostile]
+			},
+			async clear() {},
+		}
+		const ran = createRecorder<[]>()
+		const queue = new Queue<string, string>({
+			store,
+			handler: (input) => {
+				ran.handler()
+				return input
+			},
+		})
+		await expect(queue.restore()).rejects.toSatisfy(
+			(error: unknown) =>
+				isQueueError(error) && error.code === 'store' && error.context?.operation === 'load',
+		)
+		await waitForDelay(0)
+		expect(ran.count).toBe(0)
+		expect(queue.count).toBe(0)
+		expect(queue.active).toBe(0)
+	})
+
+	it('rejects malformed restored ids before reservation', async () => {
+		const malformed = new Proxy(
+			{ id: 'valid', input: 'payload', attempts: 0 },
+			{
+				get(target, property, receiver) {
+					if (property === 'id') return 42
+					return Reflect.get(target, property, receiver)
+				},
+			},
+		)
+		const store: QueueStoreInterface<string> = {
+			async save() {},
+			async remove() {},
+			async load() {
+				return [malformed]
+			},
+			async clear() {},
+		}
+		const queue = new Queue<string, string>({ store, handler: (input) => input })
+		await expect(queue.restore()).rejects.toSatisfy(
+			(error: unknown) => isQueueError(error) && error.code === 'store',
+		)
+		expect(queue.count).toBe(0)
+	})
+
+	it('rejects malformed restored attempt counts before reservation', async () => {
+		const malformed = new Proxy(
+			{ id: 'valid', input: 'payload', attempts: 0 },
+			{
+				get(target, property, receiver) {
+					if (property === 'attempts') return -1
+					return Reflect.get(target, property, receiver)
+				},
+			},
+		)
+		const store: QueueStoreInterface<string> = {
+			async save() {},
+			async remove() {},
+			async load() {
+				return [malformed]
+			},
+			async clear() {},
+		}
+		const queue = new Queue<string, string>({ store, handler: (input) => input })
+		await expect(queue.restore()).rejects.toSatisfy(
+			(error: unknown) => isQueueError(error) && error.code === 'store',
+		)
+		expect(queue.count).toBe(0)
+	})
+})
+
+describe('Queue — reentrant terminal drain ordering', () => {
+	it('emits success then the latched drain before a reentrant entry settles', async () => {
+		const order: string[] = []
+		const reentrant: Promise<number>[] = []
+		const queue = new Queue<number, number>({ handler: (input) => input })
+		queue.emitter.on('success', (id) => {
+			order.push(`success:${id}`)
+			if (id === 'first') reentrant.push(queue.enqueue(2, { id: 'second' }))
+		})
+		queue.emitter.on('drain', () => order.push('drain'))
+
+		await expect(queue.enqueue(1, { id: 'first' })).resolves.toBe(1)
+		await expect(requireElement(reentrant, 0)).resolves.toBe(2)
+		expect(order).toEqual(['success:first', 'drain', 'success:second', 'drain'])
+	})
+
+	it('emits failure then the latched drain before a reentrant entry settles', async () => {
+		const order: string[] = []
+		const reentrant: Promise<string>[] = []
+		const queue = new Queue<string, string>({
+			handler: (input) => {
+				if (input === 'bad') throw new Error('bad')
+				return input
+			},
+		})
+		queue.emitter.on('failure', (id) => {
+			order.push(`failure:${id}`)
+			if (id === 'first') reentrant.push(queue.enqueue('good', { id: 'second' }))
+		})
+		queue.emitter.on('success', (id) => order.push(`success:${id}`))
+		queue.emitter.on('drain', () => order.push('drain'))
+
+		await expect(queue.enqueue('bad', { id: 'first' })).rejects.toThrow('bad')
+		await expect(requireElement(reentrant, 0)).resolves.toBe('good')
+		expect(order).toEqual(['failure:first', 'drain', 'success:second', 'drain'])
 	})
 })

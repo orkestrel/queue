@@ -29,7 +29,7 @@ import { MemoryQueueStore } from './stores/MemoryQueueStore.js'
  *
  * @example
  * ```ts
- * import { createQueue } from '@src/core'
+ * import { createQueue } from '@orkestrel/queue'
  *
  * const queue = createQueue<string, number>({
  * 	handler: async (url, { signal }) => (await fetch(url, { signal })).status,
@@ -69,7 +69,9 @@ export function createQueue<TInput, TResult>(
  *
  * @example
  * ```ts
- * import { createDatabaseQueueStore, createMemoryDriver, objectShape, stringShape } from '@src/core'
+ * import { objectShape, stringShape } from '@orkestrel/contract'
+ * import { createMemoryDriver } from '@orkestrel/database'
+ * import { createDatabaseQueueStore } from '@orkestrel/queue'
  *
  * const store = createDatabaseQueueStore(
  * 	objectShape({ url: stringShape(), label: stringShape() }),
@@ -93,7 +95,11 @@ export function createDatabaseQueueStore(
 	input: ContractShape,
 	driver: DriverInterface,
 ): QueueStoreInterface<unknown> {
-	const columns = { id: stringShape(), input, attempts: integerShape({ min: 0 }) }
+	const columns = {
+		id: stringShape(),
+		input,
+		attempts: integerShape({ min: 0, max: Number.MAX_SAFE_INTEGER }),
+	}
 	const database = createDatabase({ driver, tables: { entries: columns } })
 	const table: TableInterface<StoredEntry<unknown>> = database.table('entries')
 	return new DatabaseQueueStore(table)
@@ -104,34 +110,28 @@ export function createDatabaseQueueStore(
  * over a plain `Map` (the twin of {@link DatabaseQueueStore}).
  *
  * @remarks
- * The convenience for a non-persistent queue store (tests, ephemeral queues): the entries
- * live in a process-lifetime `Map` and are gone when the process exits. UNLIKE
- * {@link createDatabaseQueueStore}, no `databases` table / driver codec is built — a queue
- * entry is already pure JSON, so the memory tier needs no encoding (AGENTS §21). The
- * `input` shape is accepted for SOURCE-COMPATIBILITY with the driver-backed family (every
- * call site passes its payload shape, and the store is still typed by it through `Infer`),
- * but a plain-`Map` store does not validate the payload — durability + contract narrowing
- * are {@link DatabaseQueueStore}'s job. For durability across restarts, build the store
- * over a server JSON / SQLite driver via {@link createDatabaseQueueStore} (or the server
- * `createJSONQueueStore`).
+ * The entries live in a process-lifetime `Map` and are gone when the process exits. The
+ * supplied shape is compiled and enforced for every save. Exact JSON inputs are cloned
+ * into deeply frozen owned snapshots, and each load returns fresh snapshots, so neither
+ * caller mutation nor a returned object can alias stored state. For durability across
+ * restarts, build the store over a persistent driver with
+ * {@link createDatabaseQueueStore}.
  *
  * @typeParam TInput - The contract shape of each entry's `input` payload
- * @param _input - The {@link ContractShape} for the work payload — types the store (via
- *   `Infer`); the plain-`Map` backing does not use it at runtime, so it is `_`-prefixed
- *   (AGENTS unused-arg convention) while staying in the signature for source-compatibility
- *   with the driver-backed family
- * @returns A memory-backed {@link QueueStoreInterface}, typed by `_input`
+ * @param input - The runtime {@link ContractShape} for the work payload
+ * @returns A validated memory-backed {@link QueueStoreInterface}, typed by `input`
  *
  * @example
  * ```ts
- * import { createMemoryQueueStore, stringShape } from '@src/core'
+ * import { stringShape } from '@orkestrel/contract'
+ * import { createMemoryQueueStore } from '@orkestrel/queue'
  *
  * const store = createMemoryQueueStore(stringShape())
  * await store.save({ id: 'job-1', input: 'task', attempts: 0 })
  * ```
  */
 export function createMemoryQueueStore<TInput extends ContractShape>(
-	_input: TInput,
+	input: TInput,
 ): QueueStoreInterface<Infer<TInput>> {
-	return new MemoryQueueStore<Infer<TInput>>()
+	return new MemoryQueueStore(input)
 }

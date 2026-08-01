@@ -1,6 +1,6 @@
 {
 	"name": "@orkestrel/queue",
-	"version": "0.0.4",
+	"version": "0.0.5",
 	"description": "A typed, persistent-capable FIFO job queue — bounded concurrency, retries, per-attempt timeout/abort, and an optional durable store for resuming outstanding work after a restart. Part of the @orkestrel line.",
 	"keywords": [
 		"async",
@@ -66,21 +66,21 @@
 	},
 	"dependencies": {
 		"@orkestrel/abort": "^0.0.4",
-		"@orkestrel/contract": "^0.0.8",
-		"@orkestrel/database": "^0.0.6",
-		"@orkestrel/emitter": "^0.0.4",
+		"@orkestrel/contract": "^0.0.9",
+		"@orkestrel/database": "^0.0.7",
+		"@orkestrel/emitter": "^0.0.5",
 		"@orkestrel/timeout": "^0.0.4"
 	},
 	"devDependencies": {
 		"@microsoft/api-extractor": "^7.58.12",
-		"@orkestrel/guide": "^0.0.7",
-		"@orkestrel/scaffold": "^0.0.11",
+		"@orkestrel/guide": "^0.0.8",
+		"@orkestrel/scaffold": "^0.0.15",
 		"@types/node": "^26.1.2",
 		"@vitest/browser-playwright": "^4.1.10",
 		"oxfmt": "^0.61.0",
 		"oxlint": "^1.76.0",
 		"typescript": "^6.0.3",
-		"vite": "^8.1.5",
+		"vite": "^8.2.0",
 		"vite-plugin-dts": "^5.0.3",
 		"vitest": "^4.1.10"
 	},
