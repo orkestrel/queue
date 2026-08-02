@@ -137,7 +137,7 @@ export type QueueHandler<TInput, TResult> = (
  * - `id` — a trace label for the entry; defaults to a random UUID.
  * - `retries` — extra attempts after the first on failure (or a per-attempt
  *   timeout); overrides the queue default. A queue-level abort never retries.
- * - `timeout` — the nonnegative per-attempt deadline in milliseconds, at most
+ * - `timeout` — the nonnegative integer per-attempt deadline in milliseconds, at most
  *   `2_147_483_647`; overrides the queue default. Zero means no deadline.
  * - `signal` — an entry-scoped abort; once it fires the entry rejects (its
  *   in-flight attempt's `signal` fires too) and does not retry.
@@ -164,7 +164,7 @@ export interface QueueEntryOptions {
  *   `1` and must be a positive safe integer.
  * - `retries` — the default extra attempts per entry on failure; defaults to `0`
  *   and must be a nonnegative safe integer.
- * - `timeout` — the default per-attempt deadline in milliseconds; defaults to zero
+ * - `timeout` — the default per-attempt deadline in integer milliseconds; defaults to zero
  *   and must be between zero and `2_147_483_647`, inclusive.
  * - `store` — durable backing; outstanding entries survive a restart; call
  *   `restore()` to re-run them.

@@ -36,7 +36,7 @@ export function isQueueRetries(value: unknown): value is number {
  * Determine whether a value is a valid queue timeout.
  *
  * @param value - Value to inspect
- * @returns Whether the value is within the native timer range, inclusive
+ * @returns Whether the value is an integer within the native timer range, inclusive
  *
  * @example
  * ```ts
@@ -45,7 +45,7 @@ export function isQueueRetries(value: unknown): value is number {
  * ```
  */
 export function isQueueTimeout(value: unknown): value is number {
-	return isFiniteNumber(value) && value >= 0 && value <= 2_147_483_647
+	return isFiniteNumber(value) && isInteger(value) && value >= 0 && value <= 2_147_483_647
 }
 
 /**

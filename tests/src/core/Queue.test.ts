@@ -1606,7 +1606,14 @@ describe('Queue numeric contracts', () => {
 				expect.objectContaining({ code: 'invalid' }),
 			)
 		}
-		for (const timeout of [Number.NaN, Infinity, Number.NEGATIVE_INFINITY, -1, 2_147_483_648]) {
+		for (const timeout of [
+			Number.NaN,
+			Infinity,
+			Number.NEGATIVE_INFINITY,
+			-1,
+			0.5,
+			2_147_483_648,
+		]) {
 			expect(() => new Queue({ timeout, handler: (input: number) => input })).toThrow(
 				expect.objectContaining({ code: 'invalid' }),
 			)
@@ -1837,6 +1844,9 @@ describe('Queue numeric contracts', () => {
 		expect(() => queue.enqueue(1, { timeout: -1 })).toThrow(
 			expect.objectContaining({ code: 'invalid' }),
 		)
+		expect(() => queue.enqueue(1, { timeout: 0.5 })).toThrow(
+			expect.objectContaining({ code: 'invalid' }),
+		)
 		expect(() => queue.enqueue(1, { timeout: 2_147_483_648 })).toThrow(
 			expect.objectContaining({ code: 'invalid' }),
 		)
@@ -2020,6 +2030,7 @@ describe('Queue — public guards and runtime ids', () => {
 		expect(isQueueRetries(0.5)).toBe(false)
 		expect(isQueueTimeout(0)).toBe(true)
 		expect(isQueueTimeout(-0)).toBe(true)
+		expect(isQueueTimeout(0.5)).toBe(false)
 		expect(isQueueTimeout(2_147_483_647)).toBe(true)
 		expect(isQueueTimeout(2_147_483_648)).toBe(false)
 		expect(isQueueTimeout(Infinity)).toBe(false)
