@@ -73,35 +73,40 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	 * @param options - Handler, validated execution limits, persistence, and observation hooks
 	 */
 	constructor(options: QueueOptions<TInput, TResult>) {
-		const concurrency = options.concurrency ?? 1
-		const retries = options.retries ?? 0
-		const timeout = options.timeout ?? 0
+		const configuredConcurrency = options.concurrency
+		const concurrency = configuredConcurrency === undefined ? 1 : configuredConcurrency
 		if (!isQueueConcurrency(concurrency)) {
 			throw new QueueError('queue concurrency must be a positive safe integer', {
 				code: 'invalid',
 				context: { option: 'concurrency', value: concurrency },
 			})
 		}
+		const configuredRetries = options.retries
+		const retries = configuredRetries === undefined ? 0 : configuredRetries
 		if (!isQueueRetries(retries)) {
 			throw new QueueError('queue retries must be a nonnegative safe integer', {
 				code: 'invalid',
 				context: { option: 'retries', value: retries },
 			})
 		}
+		const configuredTimeout = options.timeout
+		const timeout = configuredTimeout === undefined ? 0 : configuredTimeout
 		if (!isQueueTimeout(timeout)) {
 			throw new QueueError('queue timeout must be within the native timer range', {
 				code: 'invalid',
 				context: { option: 'timeout', value: timeout },
 			})
 		}
+		const on = options.on
+		const error = options.error
 		this.#handler = options.handler
 		this.#concurrency = concurrency
 		this.#retries = retries
 		this.#timeout = timeout
 		this.#store = options.store
 		this.#emitter = new Emitter<QueueEventMap<TResult>>({
-			...(options.on === undefined ? {} : { on: options.on }),
-			...(options.error === undefined ? {} : { error: options.error }),
+			...(on === undefined ? {} : { on }),
+			...(error === undefined ? {} : { error }),
 		})
 	}
 
@@ -235,27 +240,30 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	async restore(): Promise<void> {
 		if (this.#store === undefined || this.stopped || this.#destroyed) return
 		const generation = this.#generation
-		let entries: readonly StoredEntry<TInput>[]
+		const entries: StoredEntry<TInput>[] = []
+		let malformed = false
 		try {
 			const loaded = await this.#store.load()
-			const snapshots: StoredEntry<TInput>[] = []
 			for (const stored of loaded) {
 				const id: unknown = stored.id
 				const input = stored.input
 				const attempts: unknown = stored.attempts
 				if (!isString(id) || !isQueueRetries(attempts)) {
-					throw new QueueError('queue store returned an invalid entry', {
-						code: 'store',
-						context: { operation: 'load' },
-					})
+					malformed = true
+					break
 				}
-				snapshots.push(Object.freeze({ id, input, attempts }))
+				entries.push(Object.freeze({ id, input, attempts }))
 			}
-			entries = snapshots
 		} catch (error: unknown) {
 			throw new QueueError('queue store load failed', {
 				code: 'store',
 				cause: error,
+				context: { operation: 'load' },
+			})
+		}
+		if (malformed) {
+			throw new QueueError('queue store returned an invalid entry', {
+				code: 'store',
 				context: { operation: 'load' },
 			})
 		}

@@ -70,24 +70,31 @@ describe('Queue — bounded concurrency', () => {
 			},
 		})
 
-		const all = [queue.enqueue(0), queue.enqueue(1), queue.enqueue(2)]
-		// Let the workers pick up as many as they may.
-		await waitForDelay(10)
-		// Only two slots — the third entry has not started, and `active` caps at 2.
-		expect(started.count).toBe(2)
-		expect(queue.active).toBe(2)
+		const all = Promise.all([queue.enqueue(0), queue.enqueue(1), queue.enqueue(2)])
+		void all.catch(() => {})
+		try {
+			// Let the workers pick up as many as they may.
+			await waitForDelay(10)
+			// Only two slots — the third entry has not started, and `active` caps at 2.
+			expect(started.count).toBe(2)
+			expect(queue.active).toBe(2)
 
-		requireElement(gates, 0).resolve()
-		await waitForDelay(10)
-		// Freeing one slot lets the third start; still never more than two at once.
-		expect(started.count).toBe(3)
-		expect(queue.active).toBe(2)
+			requireElement(gates, 0).resolve()
+			await waitForDelay(10)
+			// Freeing one slot lets the third start; still never more than two at once.
+			expect(started.count).toBe(3)
+			expect(queue.active).toBe(2)
 
-		requireElement(gates, 1).resolve()
-		requireElement(gates, 2).resolve()
-		await Promise.all(all)
-		expect(peak).toBe(2)
-		expect(queue.active).toBe(0)
+			requireElement(gates, 1).resolve()
+			requireElement(gates, 2).resolve()
+			await all
+			expect(peak).toBe(2)
+			expect(queue.active).toBe(0)
+		} finally {
+			for (const gate of gates) gate.resolve()
+			await Promise.allSettled([all])
+			await queue.destroy()
+		}
 	})
 })
 
@@ -380,24 +387,31 @@ describe('Queue — durability: persist on accept, remove on settle', () => {
 		})
 
 		const running = queue.enqueue('a')
-		// First attempt in flight — persisted at attempts 0.
-		await waitForDelay(10)
-		expect((await store.load())[0]?.attempts).toBe(0)
+		void running.catch(() => {})
+		try {
+			// First attempt in flight — persisted at attempts 0.
+			await waitForDelay(10)
+			expect((await store.load())[0]?.attempts).toBe(0)
 
-		// Fail attempt 0 → the queue retries; the climbing count is persisted (attempts 1).
-		requireElement(gates, 0).resolve()
-		await waitForDelay(10)
-		expect((await store.load())[0]?.attempts).toBe(1)
+			// Fail attempt 0 → the queue retries; the climbing count is persisted (attempts 1).
+			requireElement(gates, 0).resolve()
+			await waitForDelay(10)
+			expect((await store.load())[0]?.attempts).toBe(1)
 
-		// Fail attempt 1 → retry again, persisted at attempts 2.
-		requireElement(gates, 1).resolve()
-		await waitForDelay(10)
-		expect((await store.load())[0]?.attempts).toBe(2)
+			// Fail attempt 1 → retry again, persisted at attempts 2.
+			requireElement(gates, 1).resolve()
+			await waitForDelay(10)
+			expect((await store.load())[0]?.attempts).toBe(2)
 
-		// Attempt 2 succeeds → the row is removed.
-		requireElement(gates, 2).resolve()
-		await expect(running).resolves.toBe('ok')
-		expect(await store.load()).toEqual([])
+			// Attempt 2 succeeds → the row is removed.
+			requireElement(gates, 2).resolve()
+			await expect(running).resolves.toBe('ok')
+			expect(await store.load()).toEqual([])
+		} finally {
+			for (const gate of gates) gate.resolve()
+			await Promise.allSettled([running])
+			await queue.destroy()
+		}
 	})
 })
 
@@ -1337,20 +1351,27 @@ describe('Queue — wake-park under saturation has no stuck entry', () => {
 		const p0 = queue.enqueue(0)
 		const p1 = queue.enqueue(1)
 		const p2 = queue.enqueue(2)
-		await waitForDelay(10)
-		expect(started.count).toBe(2) // only two started; the third is parked
+		const all = Promise.all([p0, p1, p2])
+		void all.catch(() => {})
+		try {
+			await waitForDelay(10)
+			expect(started.count).toBe(2) // only two started; the third is parked
 
-		// Free exactly one slot — the parked third entry must wake and start promptly.
-		requireElement(gates, 0).resolve()
-		await p0
-		await waitForDelay(10)
-		expect(started.calls.map(([input]) => input).sort()).toEqual([0, 1, 2])
+			// Free exactly one slot — the parked third entry must wake and start promptly.
+			requireElement(gates, 0).resolve()
+			await waitForDelay(10)
+			expect(started.calls.map(([input]) => input).sort()).toEqual([0, 1, 2])
 
-		requireElement(gates, 1).resolve()
-		requireElement(gates, 2).resolve()
-		await Promise.all([p1, p2])
-		expect(queue.count).toBe(0)
-		expect(queue.active).toBe(0)
+			requireElement(gates, 1).resolve()
+			requireElement(gates, 2).resolve()
+			await all
+			expect(queue.count).toBe(0)
+			expect(queue.active).toBe(0)
+		} finally {
+			for (const gate of gates) gate.resolve()
+			await Promise.allSettled([all])
+			await queue.destroy()
+		}
 	})
 })
 
@@ -1597,6 +1618,209 @@ describe('Queue numeric contracts', () => {
 		})
 		expect(queue.active).toBe(0)
 		expect(queue.count).toBe(0)
+	})
+
+	it('rejects runtime null for every constructor numeric option with exact context', () => {
+		expect(() =>
+			Reflect.construct(Queue, [{ concurrency: null, handler: (input: number) => input }]),
+		).toThrow(
+			expect.objectContaining({
+				code: 'invalid',
+				context: { option: 'concurrency', value: null },
+			}),
+		)
+		expect(() =>
+			Reflect.construct(Queue, [{ retries: null, handler: (input: number) => input }]),
+		).toThrow(
+			expect.objectContaining({
+				code: 'invalid',
+				context: { option: 'retries', value: null },
+			}),
+		)
+		expect(() =>
+			Reflect.construct(Queue, [{ timeout: null, handler: (input: number) => input }]),
+		).toThrow(
+			expect.objectContaining({
+				code: 'invalid',
+				context: { option: 'timeout', value: null },
+			}),
+		)
+	})
+
+	it('uses constructor defaults only for explicit undefined numeric options', async () => {
+		const gates = [createGate<number>(), createGate<number>()]
+		const attempts = createRecorder<[number]>()
+		const failure = new Error('default retries exhausted')
+		const constructed: unknown = Reflect.construct(Queue, [
+			{
+				concurrency: undefined,
+				retries: undefined,
+				timeout: undefined,
+				handler: async (input: number) => {
+					attempts.handler(input)
+					await requireElement(gates, input).promise
+					if (input === 0) throw failure
+					return input
+				},
+			},
+		])
+		if (!(constructed instanceof Queue)) throw new Error('expected a Queue instance')
+		const first = constructed.enqueue(0)
+		const second = constructed.enqueue(1)
+		const all = Promise.allSettled([first, second])
+
+		try {
+			expect(constructed.active).toBe(1)
+			requireElement(gates, 0).resolve(0)
+			await waitForDelay(0)
+			expect(attempts.calls).toEqual([[0], [1]])
+			expect(constructed.active).toBe(1)
+			await waitForDelay(5)
+			expect(constructed.active).toBe(1)
+			requireElement(gates, 1).resolve(1)
+			expect(await all).toEqual([
+				{ status: 'rejected', reason: failure },
+				{ status: 'fulfilled', value: 1 },
+			])
+		} finally {
+			for (const [index, gate] of gates.entries()) gate.resolve(index)
+			await all
+			await constructed.destroy()
+		}
+	})
+
+	it('snapshots volatile constructor values and emitter hooks exactly once', async () => {
+		const reads = createRecorder<[string]>()
+		const initialEnqueue = createRecorder<[string]>()
+		const laterEnqueue = createRecorder<[string]>()
+		const initialErrors = createErrorRecorder()
+		const laterErrors = createErrorRecorder()
+		const listenerFailure = new Error('constructor listener failure')
+		let concurrencyReads = 0
+		let retriesReads = 0
+		let timeoutReads = 0
+		let onReads = 0
+		let errorReads = 0
+		const queue = new Queue({
+			handler: (input: number) => input + 1,
+			get concurrency() {
+				concurrencyReads += 1
+				reads.handler('concurrency')
+				return concurrencyReads === 1 ? 1 : 0
+			},
+			get retries() {
+				retriesReads += 1
+				reads.handler('retries')
+				return retriesReads === 1 ? 0 : -1
+			},
+			get timeout() {
+				timeoutReads += 1
+				reads.handler('timeout')
+				return timeoutReads === 1 ? 0 : -1
+			},
+			get on() {
+				onReads += 1
+				reads.handler('on')
+				return onReads === 1
+					? { enqueue: initialEnqueue.handler }
+					: { enqueue: laterEnqueue.handler }
+			},
+			get error() {
+				errorReads += 1
+				reads.handler('error')
+				return errorReads === 1 ? initialErrors.handler : laterErrors.handler
+			},
+		})
+
+		try {
+			queue.emitter.on('success', () => {
+				throw listenerFailure
+			})
+			await expect(queue.enqueue(1, { id: 'volatile' })).resolves.toBe(2)
+			expect(reads.calls).toEqual([['concurrency'], ['retries'], ['timeout'], ['on'], ['error']])
+			expect(initialEnqueue.calls).toEqual([['volatile']])
+			expect(laterEnqueue.count).toBe(0)
+			expect(initialErrors.calls).toEqual([[listenerFailure, 'success']])
+			expect(laterErrors.count).toBe(0)
+		} finally {
+			await queue.destroy()
+		}
+	})
+
+	it('fails each invalid numeric constructor option before reading later options', () => {
+		const reads = createRecorder<[string]>()
+		const errors = createErrorRecorder()
+		let concurrency = 0
+		let retries = 0
+		let timeout = 0
+		const options = {
+			handler: (input: number) => input,
+			get concurrency() {
+				reads.handler('concurrency')
+				return concurrency
+			},
+			get retries() {
+				reads.handler('retries')
+				return retries
+			},
+			get timeout() {
+				reads.handler('timeout')
+				return timeout
+			},
+			get on() {
+				reads.handler('on')
+				return {}
+			},
+			get error() {
+				reads.handler('error')
+				return errors.handler
+			},
+		}
+
+		let failure: unknown
+		try {
+			void new Queue(options)
+		} catch (error: unknown) {
+			failure = error
+		}
+		if (failure === null || !isQueueError(failure)) {
+			throw new Error('expected invalid concurrency QueueError')
+		}
+		expect(failure.code).toBe('invalid')
+		expect(failure.context).toEqual({ option: 'concurrency', value: 0 })
+		expect(reads.calls).toEqual([['concurrency']])
+
+		reads.clear()
+		concurrency = 1
+		retries = -1
+		failure = undefined
+		try {
+			void new Queue(options)
+		} catch (error: unknown) {
+			failure = error
+		}
+		if (failure === null || !isQueueError(failure)) {
+			throw new Error('expected invalid retries QueueError')
+		}
+		expect(failure.code).toBe('invalid')
+		expect(failure.context).toEqual({ option: 'retries', value: -1 })
+		expect(reads.calls).toEqual([['concurrency'], ['retries']])
+
+		reads.clear()
+		retries = 0
+		timeout = -1
+		failure = undefined
+		try {
+			void new Queue(options)
+		} catch (error: unknown) {
+			failure = error
+		}
+		if (failure === null || !isQueueError(failure)) {
+			throw new Error('expected invalid timeout QueueError')
+		}
+		expect(failure.code).toBe('invalid')
+		expect(failure.context).toEqual({ option: 'timeout', value: -1 })
+		expect(reads.calls).toEqual([['concurrency'], ['retries'], ['timeout']])
 	})
 
 	it('throws immediately for invalid per-entry retries and timeout', () => {
@@ -2292,9 +2516,10 @@ describe('Queue — active cleanup and handler failure isolation', () => {
 
 describe('Queue — atomic restore validation', () => {
 	it('contains a non-iterable load result as a coded store failure', async () => {
+		const failure = new Error('hostile iterator')
 		const loaded = new Proxy([{ id: 'valid', input: 'payload', attempts: 0 }], {
 			get(target, property, receiver) {
-				if (property === Symbol.iterator) throw new Error('hostile iterator')
+				if (property === Symbol.iterator) throw failure
 				return Reflect.get(target, property, receiver)
 			},
 		})
@@ -2309,18 +2534,23 @@ describe('Queue — atomic restore validation', () => {
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
 		await expect(queue.restore()).rejects.toSatisfy(
 			(error: unknown) =>
-				isQueueError(error) && error.code === 'store' && error.context?.operation === 'load',
+				isQueueError(error) &&
+				error.message === 'queue store load failed' &&
+				error.code === 'store' &&
+				error.cause === failure &&
+				error.context?.operation === 'load',
 		)
 		expect(queue.count).toBe(0)
 		expect(queue.active).toBe(0)
 	})
 
 	it('validates every loaded entry before reserving the first one', async () => {
+		const failure = new Error('hostile attempts getter')
 		const hostile = new Proxy(
 			{ id: 'hostile', input: 'late', attempts: 0 },
 			{
 				get(target, property, receiver) {
-					if (property === 'attempts') throw new Error('hostile attempts getter')
+					if (property === 'attempts') throw failure
 					return Reflect.get(target, property, receiver)
 				},
 			},
@@ -2343,7 +2573,11 @@ describe('Queue — atomic restore validation', () => {
 		})
 		await expect(queue.restore()).rejects.toSatisfy(
 			(error: unknown) =>
-				isQueueError(error) && error.code === 'store' && error.context?.operation === 'load',
+				isQueueError(error) &&
+				error.message === 'queue store load failed' &&
+				error.code === 'store' &&
+				error.cause === failure &&
+				error.context?.operation === 'load',
 		)
 		await waitForDelay(0)
 		expect(ran.count).toBe(0)
@@ -2371,7 +2605,12 @@ describe('Queue — atomic restore validation', () => {
 		}
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
 		await expect(queue.restore()).rejects.toSatisfy(
-			(error: unknown) => isQueueError(error) && error.code === 'store',
+			(error: unknown) =>
+				isQueueError(error) &&
+				error.message === 'queue store returned an invalid entry' &&
+				error.code === 'store' &&
+				error.cause === undefined &&
+				error.context?.operation === 'load',
 		)
 		expect(queue.count).toBe(0)
 	})
@@ -2396,7 +2635,12 @@ describe('Queue — atomic restore validation', () => {
 		}
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
 		await expect(queue.restore()).rejects.toSatisfy(
-			(error: unknown) => isQueueError(error) && error.code === 'store',
+			(error: unknown) =>
+				isQueueError(error) &&
+				error.message === 'queue store returned an invalid entry' &&
+				error.code === 'store' &&
+				error.cause === undefined &&
+				error.context?.operation === 'load',
 		)
 		expect(queue.count).toBe(0)
 	})

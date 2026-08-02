@@ -319,6 +319,7 @@ From [`types.ts`](../../src/server/types.ts).
 | `CatalogAllowance`      | type      |
 | `SyncBase`              | type      |
 | `SyncBranch`            | type      |
+| `VersionLookup`         | type      |
 | `GuideWrite`            | interface |
 | `MaterializerInterface` | interface |
 | `SyncEventMap`          | type      |
@@ -346,7 +347,9 @@ identity, and `WriteDirectoryResult` pairs the final anchor with the subset a ca
 `CatalogAllowance` are one-cell `Float64Array` allowances: the former shares a byte budget across
 concurrent network readers, while the latter shares one entry budget across every fleet root and
 child visited by a catalog operation. `SyncBase` and `SyncBranch` are normalized strings returned
-only by their corresponding boundary parsers.
+only by their corresponding boundary parsers. `VersionLookup` is the bare-name registry result:
+a successful lookup carries `latest` with `freshness: 'behind'` because no declared range was
+supplied as a reference, while `missing` and `failed` carry a `note` and no invented version.
 
 `SyncOptions` groups the injectable endpoints under the entity they configure — `guides` with
 `base`, `branch`, and `timeout`; `registry` with `base` and `timeout` — alongside `concurrency`,
@@ -689,6 +692,7 @@ From [`parsers.ts`](../../src/server/parsers.ts).
 | Name                       | Kind     |
 | -------------------------- | -------- |
 | `parseSyncDependencies`    | function |
+| `parseSyncNames`           | function |
 | `parseFilesystemPaths`     | function |
 | `parsePortablePaths`       | function |
 | `parseWritePreconditions`  | function |
@@ -708,7 +712,9 @@ subset used in raw-guide URLs: it rejects overlong values, empty or dot-leading 
 `@{`, the single `@`, trailing dots, and `.lock` suffixes without regard to case.
 `parseSyncCurrent` snapshots only the declared guide references, enforcing both the per-file and
 cumulative byte allowance. The three array parsers return frozen copies read through property
-descriptors, so a caller-supplied array can never smuggle in a getter.
+descriptors, so a caller-supplied array can never smuggle in a getter. `parseSyncNames` snapshots a
+bounded dense array of unique npm package names and validates only the names; declaration ranges
+remain the responsibility of `parseSyncDependencies` and the blueprint gate.
 
 ### Shapers — core
 
@@ -1290,16 +1296,18 @@ The interface also exposes the readonly `emitter`.
 
 #### `SyncInterface`
 
-| Method     | Returns                            |
-| ---------- | ---------------------------------- |
-| `guides`   | `Promise<readonly GuideSync[]>`    |
-| `versions` | `Promise<readonly VersionSync[]>`  |
-| `catalog`  | `Promise<readonly CatalogEntry[]>` |
-| `pull`     | `Promise<SyncReport>`              |
-| `write`    | `Promise<readonly string[]>`       |
-| `destroy`  | `void`                             |
+| Method     | Returns                             |
+| ---------- | ----------------------------------- |
+| `lookup`   | `Promise<readonly VersionLookup[]>` |
+| `guides`   | `Promise<readonly GuideSync[]>`     |
+| `versions` | `Promise<readonly VersionSync[]>`   |
+| `catalog`  | `Promise<readonly CatalogEntry[]>`  |
+| `pull`     | `Promise<SyncReport>`               |
+| `write`    | `Promise<readonly string[]>`        |
+| `destroy`  | `void`                              |
 
-`guides(deps, current?)` fetches each dependency's upstream guide. The optional `current` map is
+`lookup(names)` resolves registry versions from bare package names, with no declaration range
+required or synthesized. `guides(deps, current?)` fetches each dependency's upstream guide. The optional `current` map is
 keyed by dependency name: with it, a fetched guide byte-equal to its entry verdicts `current` and
 anything else verdicts `behind`; without it, every successful fetch verdicts `behind`, because no
 reference means it needs syncing. `versions(deps)` compares each declared range to the registry
@@ -2308,6 +2316,7 @@ import { createSync } from '@orkestrel/scaffold/server'
 
 const sync = createSync({ concurrency: 4, retries: 1 })
 
+await sync.lookup(['@orkestrel/contract'])
 const report = await sync.pull('.')
 if (report.failed === 0) await sync.write(report, '.')
 
@@ -2432,6 +2441,7 @@ import {
 	parseSyncBranch,
 	parseSyncCurrent,
 	parseSyncDependencies,
+	parseSyncNames,
 	parseSyncOptions,
 	parseWritePreconditions,
 	syncGuideOptionsShape,
@@ -2454,6 +2464,7 @@ parseMaterializerOptions({ host: './dist/host' })
 parseSyncBase('registry.npmjs.org') // 'https://registry.npmjs.org'
 parseSyncBranch('main')
 parseSyncCurrent({ '@orkestrel/contract': '# contract\n' }, ['@orkestrel/contract'], 16_777_216)
+parseSyncNames(['@orkestrel/contract', 'zod'])
 parseSyncDependencies([{ name: '@orkestrel/contract', range: '^0.0.7' }], false)
 parsePortablePaths(['src/core/index.ts'], 1_000)
 parseFilesystemPaths(['./packages'], 1_000)
