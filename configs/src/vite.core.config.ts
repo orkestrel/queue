@@ -5,7 +5,7 @@ import {
 	outputBoundary,
 	srcCore,
 	resolveWorkspacePath,
-} from '../../vite.config.ts'
+} from '../../vite.config.js'
 
 export default defineConfig(
 	srcCore({
