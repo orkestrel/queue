@@ -240,7 +240,7 @@ export function isSelfContained(source: ts.SourceFile): boolean {
 			const clause = statement.importClause
 			const named = clause?.namedBindings
 			const erased =
-				clause?.phaseModifier === ts.SyntaxKind.TypeKeyword ||
+				clause?.isTypeOnly === true ||
 				(clause !== undefined &&
 					clause.name === undefined &&
 					named !== undefined &&
@@ -248,9 +248,8 @@ export function isSelfContained(source: ts.SourceFile): boolean {
 					named.elements.length > 0 &&
 					named.elements.every((element) => element.isTypeOnly))
 			if (erased) continue
-			const moduleSpecifier = statement.moduleSpecifier
-			if (!ts.isStringLiteral(moduleSpecifier)) return false
-			const specifier = moduleSpecifier.text
+			if (!ts.isStringLiteral(statement.moduleSpecifier)) return false
+			const specifier = statement.moduleSpecifier.text
 			if (!specifier.startsWith('node:') || !isBuiltin(specifier)) return false
 			builtin = true
 		}
