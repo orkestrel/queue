@@ -18,7 +18,7 @@ import {
 	symbolKey,
 } from '@orkestrel/guide'
 
-const ROOT = fileURLToPath(new URL('../../../', import.meta.url))
+const ROOT = fileURLToPath(new URL('../', import.meta.url))
 const WALK_DIRS = ['src', 'guides', 'tests']
 const SELF_SPECIFIERS = ['@orkestrel/queue', '@src/core']
 
