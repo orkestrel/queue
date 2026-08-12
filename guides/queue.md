@@ -30,7 +30,7 @@
 > no delay / progress / message channels (use `concurrency: 1` for strict ordering). What
 > ships is the cooperative loop and the outstanding-only store — nothing speculative.
 >
-> Source: [`src/core`](../../src/core).
+> Source: [`src/core`](../src/core).
 
 ## Surface
 
@@ -299,11 +299,11 @@ await queue.destroy() // abort, clean up, then destroy the emitter last; idempot
 
 ## Tests
 
-- [`tests/guides.test.ts`](../../tests/guides.test.ts) — the `## Surface` ↔ `src/core` bijection (value + type exports) and the `QueueInterface` / `QueueStoreInterface` ↔ `Queue` / `MemoryQueueStore` / `DatabaseQueueStore` method bijection.
-- [`tests/src/core/Queue.test.ts`](../../tests/src/core/Queue.test.ts) — the canonical queue suite: FIFO/concurrency/retries/native-range timeouts, hostile-safe rejection normalization, one-read constructor normalization with undefined-only defaults, runtime-null rejection, fail-fast property access, real emitter-hook capture, one-read enqueue normalization and signal branding, demand-driven workers, runtime contracts, duplicate and serialized admissions, atomic claims and restore validation, stable reentrant lifecycle barriers, stale-restore generations, exclusive cleanup ownership and orphan retry, claimed-orphan clear isolation, active cleanup propagation, terminal-listener drain ordering, lifecycle behavior, observation safety, and real-store durability.
-- [`tests/src/core/factories.test.ts`](../../tests/src/core/factories.test.ts) — construction identity/wiring only: each factory returns its concrete `Queue`, `DatabaseQueueStore`, or `MemoryQueueStore` entity; behavior stays in the concrete suites.
-- [`tests/src/core/stores/MemoryQueueStore.test.ts`](../../tests/src/core/stores/MemoryQueueStore.test.ts) — the real shape-validated memory store: immutable JSON snapshots, caller/load alias isolation, one-read field capture, hostile-access containment, upsert/remove/load/clear semantics, and scale.
-- [`tests/src/core/stores/DatabaseQueueStore.test.ts`](../../tests/src/core/stores/DatabaseQueueStore.test.ts) — over a memory-backed driver store: a `save` → `load` round-trip (value + typed `input`, including nested-object payloads), `save` upserts by id (no duplicate), `remove` drops one (absent is a no-op), `load` returns all outstanding in key order, `clear` empties it, plus scale (200 entries), upsert churn on one id, and complex / edge-value inputs (nested arrays, booleans, nullables, optionals).
+- [`tests/guides.test.ts`](../tests/guides.test.ts) — the `## Surface` ↔ `src/core` bijection (value + type exports) and the `QueueInterface` / `QueueStoreInterface` ↔ `Queue` / `MemoryQueueStore` / `DatabaseQueueStore` method bijection.
+- [`tests/src/core/Queue.test.ts`](../tests/src/core/Queue.test.ts) — the canonical queue suite: FIFO/concurrency/retries/native-range timeouts, hostile-safe rejection normalization, one-read constructor normalization with undefined-only defaults, runtime-null rejection, fail-fast property access, real emitter-hook capture, one-read enqueue normalization and signal branding, demand-driven workers, runtime contracts, duplicate and serialized admissions, atomic claims and restore validation, stable reentrant lifecycle barriers, stale-restore generations, exclusive cleanup ownership and orphan retry, claimed-orphan clear isolation, active cleanup propagation, terminal-listener drain ordering, lifecycle behavior, observation safety, and real-store durability.
+- [`tests/src/core/factories.test.ts`](../tests/src/core/factories.test.ts) — construction identity/wiring only: each factory returns its concrete `Queue`, `DatabaseQueueStore`, or `MemoryQueueStore` entity; behavior stays in the concrete suites.
+- [`tests/src/core/stores/MemoryQueueStore.test.ts`](../tests/src/core/stores/MemoryQueueStore.test.ts) — the real shape-validated memory store: immutable JSON snapshots, caller/load alias isolation, one-read field capture, hostile-access containment, upsert/remove/load/clear semantics, and scale.
+- [`tests/src/core/stores/DatabaseQueueStore.test.ts`](../tests/src/core/stores/DatabaseQueueStore.test.ts) — over a memory-backed driver store: a `save` → `load` round-trip (value + typed `input`, including nested-object payloads), `save` upserts by id (no duplicate), `remove` drops one (absent is a no-op), `load` returns all outstanding in key order, `clear` empties it, plus scale (200 entries), upsert churn on one id, and complex / edge-value inputs (nested arrays, booleans, nullables, optionals).
 
 ## See also
 
@@ -311,5 +311,5 @@ await queue.destroy() // abort, clean up, then destroy the emitter last; idempot
 - [`timeout.md`](timeout.md) — the deadline primitive backing the per-attempt timeout (a parent abort clears it).
 - [`database.md`](database.md) — the storage layer the `QueueStoreInterface` persists over (a queue's durable state is just a table); the drivers a store can be built on.
 - [`contract.md`](contract.md) — the guard / shape primitives `createDatabaseQueueStore` / `createMemoryQueueStore` are typed by.
-- [`AGENTS.md`](../../AGENTS.md) — the rules; §10 lifecycle, §4.1 single-word members, §13 emitter pattern, §22 documentation-as-contracts.
-- [`README.md`](../README.md) — the guides index.
+- [`AGENTS.md`](../AGENTS.md) — the rules; §10 lifecycle, §4.1 single-word members, §13 emitter pattern, §22 documentation-as-contracts.
+- [`README.md`](README.md) — the guides index.

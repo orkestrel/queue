@@ -319,9 +319,9 @@ describe('Queue — cooperative wake-park (no busy-loop)', () => {
 // `load` / `remove` / `clear` succeed. Proves a failing persistence path's contract.
 function failingSaveStore(): {
 	readonly store: QueueStoreInterface<string>
-	readonly saves: readonly StoredEntry<string>[]
+	readonly saves: ReadonlyArray<StoredEntry<string>>
 } {
-	const saves: StoredEntry<string>[] = []
+	const saves: Array<StoredEntry<string>> = []
 	const store: QueueStoreInterface<string> = {
 		async save(entry) {
 			saves.push(entry)
@@ -573,7 +573,7 @@ describe('Queue — durability: save failures', () => {
 	it('keeps running when a per-attempt save fails (best-effort persistence)', async () => {
 		// A real store that succeeds the FIRST save (accept) then fails every later save
 		// (the climbing-attempt persistence), proving per-attempt saves are best-effort.
-		const saves: StoredEntry<string>[] = []
+		const saves: Array<StoredEntry<string>> = []
 		const removes: string[] = []
 		const store: QueueStoreInterface<string> = {
 			async save(entry) {
@@ -753,7 +753,7 @@ describe('Queue — restore on a live queue (no double-execution)', () => {
 describe('Queue — restore racing abort/destroy', () => {
 	it('launches nothing when the queue is aborted during the load() await', async () => {
 		// A real store whose `load()` blocks on a gate, so we can abort the queue mid-load.
-		const loadGate = createGate<readonly StoredEntry<string>[]>()
+		const loadGate = createGate<ReadonlyArray<StoredEntry<string>>>()
 		const seen = createRecorder<[string]>()
 		const store: QueueStoreInterface<string> = {
 			async save() {},
@@ -1390,7 +1390,7 @@ describe('Queue — wake-park under saturation has no stuck entry', () => {
 // The QueueEventMap event names recorded across the emitter tests — fed to the shared
 // `recordEmitterEvents` (AGENTS §16.1: the per-event wiring is centralized; this file
 // keeps only the names its scenarios observe).
-const QUEUE_EVENTS: readonly (keyof QueueEventMap<unknown>)[] = [
+const QUEUE_EVENTS: ReadonlyArray<keyof QueueEventMap<unknown>> = [
 	'enqueue',
 	'start',
 	'retry',
@@ -2159,7 +2159,7 @@ describe('Queue — public guards and runtime ids', () => {
 
 describe('Queue — reentrant lifecycle barriers', () => {
 	it('preinstalls the abort and destroy barriers before abort listeners run', async () => {
-		const reentrant: Promise<void>[] = []
+		const reentrant: Array<Promise<void>> = []
 		const queue = new Queue<number, number>({ handler: (input) => input })
 		queue.emitter.on('abort', () => {
 			reentrant.push(queue.abort())
@@ -2177,7 +2177,7 @@ describe('Queue — reentrant lifecycle barriers', () => {
 	})
 
 	it('returns the installed stop barrier from a reentrant drain listener', async () => {
-		const reentrant: Promise<void>[] = []
+		const reentrant: Array<Promise<void>> = []
 		const queue = new Queue<number, number>({ handler: (input) => input })
 		queue.pause()
 		queue.emitter.on('drain', () => reentrant.push(queue.stop()))
@@ -2191,7 +2191,7 @@ describe('Queue — reentrant lifecycle barriers', () => {
 	})
 
 	it('returns the installed abort barrier from a reentrant drain listener', async () => {
-		const reentrant: Promise<void>[] = []
+		const reentrant: Array<Promise<void>> = []
 		const queue = new Queue<number, number>({ handler: (input) => input })
 		queue.pause()
 		queue.emitter.on('drain', () => reentrant.push(queue.abort()))
@@ -2205,7 +2205,7 @@ describe('Queue — reentrant lifecycle barriers', () => {
 	})
 
 	it('returns the installed destroy barrier from a reentrant drain listener', async () => {
-		const reentrant: Promise<void>[] = []
+		const reentrant: Array<Promise<void>> = []
 		const queue = new Queue<number, number>({ handler: (input) => input })
 		queue.pause()
 		queue.emitter.on('drain', () => reentrant.push(queue.destroy()))
@@ -2247,7 +2247,7 @@ describe('Queue — atomic claims and stale restore generations', () => {
 	})
 
 	it('ignores a restore load that completes after stop and start change generation', async () => {
-		const load = createGate<readonly StoredEntry<string>[]>()
+		const load = createGate<ReadonlyArray<StoredEntry<string>>>()
 		const handled = createRecorder<[string]>()
 		const enqueued = createRecorder<[string]>()
 		const store: QueueStoreInterface<string> = {
@@ -2660,7 +2660,7 @@ describe('Queue — atomic restore validation', () => {
 describe('Queue — reentrant terminal drain ordering', () => {
 	it('emits success then the latched drain before a reentrant entry settles', async () => {
 		const order: string[] = []
-		const reentrant: Promise<number>[] = []
+		const reentrant: Array<Promise<number>> = []
 		const queue = new Queue<number, number>({ handler: (input) => input })
 		queue.emitter.on('success', (id) => {
 			order.push(`success:${id}`)
@@ -2675,7 +2675,7 @@ describe('Queue — reentrant terminal drain ordering', () => {
 
 	it('emits failure then the latched drain before a reentrant entry settles', async () => {
 		const order: string[] = []
-		const reentrant: Promise<string>[] = []
+		const reentrant: Array<Promise<string>> = []
 		const queue = new Queue<string, string>({
 			handler: (input) => {
 				if (input === 'bad') throw new Error('bad')

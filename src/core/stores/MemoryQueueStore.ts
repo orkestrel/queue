@@ -65,9 +65,9 @@ export class MemoryQueueStore<TInput extends ContractShape> implements QueueStor
 	}
 
 	/** Return fresh immutable snapshots of every outstanding entry. */
-	load(): Promise<readonly StoredEntry<Infer<TInput>>[]> {
+	load(): Promise<ReadonlyArray<StoredEntry<Infer<TInput>>>> {
 		try {
-			const snapshots: StoredEntry<Infer<TInput>>[] = []
+			const snapshots: Array<StoredEntry<Infer<TInput>>> = []
 			for (const entry of this.#entries.values()) {
 				const id = entry.id
 				const input = entry.input

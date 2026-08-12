@@ -49,9 +49,9 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		}
 	>()
 	readonly #live = new Map<string, PromiseWithResolvers<TResult>>()
-	readonly #pending: PromiseWithResolvers<TResult>[] = []
+	readonly #pending: Array<PromiseWithResolvers<TResult>> = []
 	readonly #claims = new Set<PromiseWithResolvers<TResult>>()
-	readonly #wakes: (() => void)[] = []
+	readonly #wakes: Array<() => void> = []
 	readonly #workers = new Set<Promise<void>>()
 	readonly #admissions = new Map<PromiseWithResolvers<TResult>, Promise<void>>()
 	readonly #orphans = new Set<PromiseWithResolvers<TResult>>()
@@ -240,7 +240,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	async restore(): Promise<void> {
 		if (this.#store === undefined || this.stopped || this.#destroyed) return
 		const generation = this.#generation
-		const entries: StoredEntry<TInput>[] = []
+		const entries: Array<StoredEntry<TInput>> = []
 		let malformed = false
 		try {
 			const loaded = await this.#store.load()
@@ -350,7 +350,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		if (this.#destroyed) {
 			return Promise.reject(new QueueError('queue is destroyed', { code: 'destroyed' }))
 		}
-		const existing: Promise<void>[] = []
+		const existing: Array<Promise<void>> = []
 		for (const [token, cleanup] of this.#cleanups) {
 			if (!this.#claims.has(token)) existing.push(cleanup)
 		}
@@ -507,10 +507,10 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		for (const resolver of resolvers) resolver()
 	}
 
-	#drain(error: QueueError): readonly Promise<void>[] {
+	#drain(error: QueueError): ReadonlyArray<Promise<void>> {
 		for (const token of this.#admissions.keys()) this.#settleToken(token, { success: false, error })
 		const tokens = this.#pending.splice(0)
-		const cleanup: Promise<void>[] = []
+		const cleanup: Array<Promise<void>> = []
 		for (const token of tokens) {
 			this.#settleToken(token, { success: false, error })
 			cleanup.push(this.#discard(token))
@@ -518,8 +518,8 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		return cleanup
 	}
 
-	#cleanOrphans(claimed: boolean): readonly Promise<void>[] {
-		const cleanup: Promise<void>[] = []
+	#cleanOrphans(claimed: boolean): ReadonlyArray<Promise<void>> {
+		const cleanup: Array<Promise<void>> = []
 		for (const token of this.#orphans) {
 			if (claimed || !this.#claims.has(token)) cleanup.push(this.#discard(token))
 		}
@@ -778,7 +778,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		})
 	}
 
-	async #finish(tasks: readonly Promise<void>[], message: string): Promise<void> {
+	async #finish(tasks: ReadonlyArray<Promise<void>>, message: string): Promise<void> {
 		const results = await Promise.allSettled(tasks)
 		const errors: unknown[] = []
 		for (const result of results) {
@@ -798,7 +798,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 
 	async #settleBarrier(
 		barrier: PromiseWithResolvers<void>,
-		tasks: readonly Promise<void>[],
+		tasks: ReadonlyArray<Promise<void>>,
 		message: string,
 	): Promise<void> {
 		try {

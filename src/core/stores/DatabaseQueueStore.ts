@@ -54,7 +54,7 @@ export class DatabaseQueueStore<TInput> implements QueueStoreInterface<TInput> {
 	}
 
 	/** Every outstanding entry — the work to resume after a restart. */
-	load(): Promise<readonly StoredEntry<TInput>[]> {
+	load(): Promise<ReadonlyArray<StoredEntry<TInput>>> {
 		return this.#table.records()
 	}
 

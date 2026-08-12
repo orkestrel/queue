@@ -271,6 +271,6 @@ export interface StoredEntry<TInput> {
 export interface QueueStoreInterface<TInput> {
 	save(entry: StoredEntry<TInput>): Promise<void>
 	remove(id: string): Promise<void>
-	load(): Promise<readonly StoredEntry<TInput>[]>
+	load(): Promise<ReadonlyArray<StoredEntry<TInput>>>
 	clear(): Promise<void>
 }
