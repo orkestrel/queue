@@ -14,46 +14,38 @@ A dual-axis index into this repository's guides — by concept, and by directory
 | ---------- | ---------------------- |
 | `src/core` | [`queue.md`](queue.md) |
 
+## Vendored guides
+
+Two guides in this folder are byte-identical mirrors shipped by the
+`@orkestrel/scaffold` shared file set. Each documents **that package's**
+surface, not anything sourced in this repo, so neither is a spec in the concept
+index above.
+
+[`guide.md`](guide.md) mirrors the guide for `@orkestrel/guide` — the
+devDependency powering this repo's guides-parity suite
+([`tests/guides.test.ts`](../tests/guides.test.ts)). It documents `Guide` /
+`Source`, the manifest, and the comparison helpers, so a reader of the parity
+suite can see the primitives it is built from without leaving this guide set.
+
+[`scaffold.md`](scaffold.md) mirrors the guide for `@orkestrel/scaffold` — the
+devDependency that vendors this repo's shared configuration, rules, and agent
+files. It documents the `new` / `audit` / `repair` / `catalog` / `overwrite`
+commands and the vendored root they write.
+
 ## Dependency reference
 
-[`abort.md`](abort.md) is a byte-identical mirror of the guide for
-`@orkestrel/abort` — a runtime dependency, the cancellation primitive each
-attempt's `signal` is built on. It documents **that package's** surface
-(a typed `AbortController` wrapper), not anything sourced in this repo; it is
-kept here so a reader of this package can see the primitive it is built from
-without leaving this guide set.
+This package's runtime dependencies are documented in their own repositories:
 
-[`contract.md`](contract.md) is a byte-identical mirror of the guide
-for `@orkestrel/contract` — a runtime dependency. It documents **that
-package's** surface (guards, combinators, parsers, and the shape DSL), not
-anything sourced in this repo; it is kept here so a reader of this package can
-see the primitives it is built from without leaving this guide set.
-
-[`database.md`](database.md) is a byte-identical mirror of the guide
-for `@orkestrel/database` — a runtime dependency, the storage layer
-`DatabaseQueueStore` persists over. It documents **that package's** surface
-(the database, tables, and driver layer), not anything sourced in this repo;
-it is kept here so a reader of this guide can see the persistence layer
-without leaving this guide set.
-
-[`emitter.md`](emitter.md) is a byte-identical mirror of the guide for
-`@orkestrel/emitter` — a runtime dependency, the typed push-observation
-surface `Queue` exposes as `emitter`. It documents **that package's** surface,
-not anything sourced in this repo; it is kept here for the same reason.
-
-[`timeout.md`](timeout.md) is a byte-identical mirror of the guide for
-`@orkestrel/timeout` — a runtime dependency, the deadline primitive backing
-each attempt's per-attempt timeout. It documents **that package's** surface
-(a typed countdown timer), not anything sourced in this repo; it is kept here
-so a reader of this package can see the primitive it is built from without
-leaving this guide set.
-
-[`guide.md`](guide.md) is a byte-identical mirror of the guide for
-`@orkestrel/guide` — the devDependency powering this repo's guides-parity test
-suite (`tests/guides.test.ts`). It documents **that package's**
-surface (`Guide` / `Source`, the manifest and comparison helpers), not
-anything sourced in this repo; it is kept here so a reader of the parity suite
-can see the primitives it is built from without leaving this guide set.
+- [`@orkestrel/abort`](https://github.com/orkestrel/abort#readme) — the
+  cancellation primitive each attempt's `signal` is built on.
+- [`@orkestrel/contract`](https://github.com/orkestrel/contract#readme) — the
+  guards, combinators, parsers, and shape DSL the factories are typed by.
+- [`@orkestrel/database`](https://github.com/orkestrel/database#readme) — the
+  storage layer `DatabaseQueueStore` persists over.
+- [`@orkestrel/emitter`](https://github.com/orkestrel/emitter#readme) — the
+  typed push-observation surface `Queue` exposes as `emitter`.
+- [`@orkestrel/timeout`](https://github.com/orkestrel/timeout#readme) — the
+  deadline primitive backing each attempt's per-attempt timeout.
 
 ## See also
 
