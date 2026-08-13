@@ -1,20 +1,14 @@
 import type { EmitterInterface, EventMap } from '@orkestrel/emitter'
+import type { RecorderInterface } from '@orkestrel/test'
+import { createRecorder } from '@orkestrel/test'
 
 // ── Environment-agnostic base setup (AGENTS §16.1) ────────────────────────────
 //
 // Loaded first by every test project (`vite.config.ts` `setupFiles[0]`). Holds ONLY
 // helpers with no `node:*` / DOM dependency, so it is safe for `src:core` alike.
-
-/**
- * Wait at least `ms` milliseconds via a real `setTimeout` — the one shared form of a
- * deliberate real-clock pause a test needs outside fake timers (AGENTS §16.1).
- *
- * @param ms - The minimum delay in milliseconds; defaults to `0` (a macrotask turn)
- * @returns A promise that resolves after the delay
- */
-export function waitForDelay(ms = 0): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms))
-}
+//
+// The fleet-wide helpers live in `@orkestrel/test`. What remains here is what is
+// specific to this package: the emitter recorder bundles and test-collection helpers.
 
 /** A manually-settled promise — the `resolve` / `reject` lifted out of its executor. */
 export interface TestGateInterface<T> {
@@ -57,65 +51,23 @@ export function requireElement<T>(values: readonly T[], index: number): T {
 	return value
 }
 
-// ── Call recorder (a real callback, not a mock) ──────────────────────────────
-//
-// AGENTS §16.1: when a test only needs to count calls or inspect arguments, use a
-// recorder — a real listener that records every invocation — rather than a test-
-// framework spy. `handler` is a genuine callback; `calls` is each invocation's
-// argument tuple, in order.
-
-/** A real call-recording callback over an argument tuple (AGENTS §16.1). */
-export interface TestRecorderInterface<TArgs extends readonly unknown[]> {
-	readonly calls: readonly TArgs[]
-	readonly count: number
-	readonly handler: (...args: TArgs) => void
-	clear(): void
-}
-
-/**
- * Create a {@link TestRecorderInterface} — a real callback that records each
- * invocation's arguments, for asserting what fired and with what (AGENTS §16.1).
- *
- * @typeParam TArgs - The argument tuple the recorded handler receives
- * @returns A recorder whose `handler` records into `calls`
- */
-export function createRecorder<TArgs extends readonly unknown[]>(): TestRecorderInterface<TArgs> {
-	const calls: TArgs[] = []
-	return {
-		get calls() {
-			return calls
-		},
-		get count() {
-			return calls.length
-		},
-		handler(...args: TArgs) {
-			calls.push(args)
-		},
-		clear() {
-			calls.length = 0
-		},
-	}
-}
-
 /**
  * Create a recorder for an {@link import('@orkestrel/emitter').EmitterErrorHandler} — the
- * emitter's own listener-error channel (AGENTS §13): a `TestRecorderInterface<[error, event]>`
+ * emitter's own listener-error channel (AGENTS §13): a `RecorderInterface<[error, event]>`
  * whose `handler` is wired as the `error` option, so an emit-safety test asserts a buggy
  * listener's throw was routed here (with the offending event name) instead of corrupting the
  * entity. Argument order is `(error, event)`, matching `EmitterErrorHandler`. A thin alias over
- * {@link createRecorder} (AGENTS §16.1 — extract-once over the per-entity emit-safety blocks).
+ * `createRecorder` (AGENTS §16.1 — extract-once over the per-entity emit-safety blocks).
  *
  * @returns A recorder of `[error: unknown, event: string]` calls
  */
-export function createErrorRecorder(): TestRecorderInterface<
-	readonly [error: unknown, event: string]
-> {
+export function createErrorRecorder(): RecorderInterface<readonly [error: unknown, event: string]> {
 	return createRecorder<readonly [error: unknown, event: string]>()
 }
 
 /** A recorder per named event of an {@link EmitterInterface}, keyed by event name. */
 export type EmitterRecorders<TMap extends EventMap, TName extends keyof TMap> = {
-	readonly [K in TName]: TestRecorderInterface<TMap[K]>
+	readonly [K in TName]: RecorderInterface<TMap[K]>
 }
 
 /**

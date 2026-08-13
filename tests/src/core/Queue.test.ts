@@ -11,13 +11,12 @@ import {
 	isQueueTimeout,
 	Queue,
 } from '@src/core'
+import { createRecorder, waitForDelay } from '@orkestrel/test'
 import {
 	createErrorRecorder,
 	createGate,
-	createRecorder,
 	recordEmitterEvents,
 	requireElement,
-	waitForDelay,
 } from '../../setup.js'
 
 // src/core/Queue.ts — the cooperative concurrent job engine. Real behaviour,
