@@ -13,7 +13,7 @@ import {
 } from '@orkestrel/contract'
 import { createMemoryDriver } from '@orkestrel/database'
 import { createDatabaseQueueStore } from '@src/core'
-import { requireElement } from '../../../setup.js'
+import { requireValue } from '@orkestrel/test'
 
 // A real DatabaseQueueStore over a fresh memory driver (no mocks) — the exact construction
 // `createMemoryQueueStore` USED to make before it became the plain-`Map` MemoryQueueStore
@@ -146,7 +146,7 @@ describe('DatabaseQueueStore — at scale', () => {
 		expect(ids).toEqual([...ids].sort())
 		// First and last entries carry their exact typed payload (no `as` — input is number).
 		expect(loaded[0]).toEqual({ id: 'job-0000', input: 0, attempts: 0 })
-		expect(requireElement(loaded, total - 1).input + 1).toBe(total)
+		expect(requireValue(loaded[total - 1]).input + 1).toBe(total)
 
 		// Remove every even-indexed entry; the odd ones remain, still in order.
 		for (let index = 0; index < total; index += 2) {

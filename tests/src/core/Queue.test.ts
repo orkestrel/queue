@@ -1,5 +1,4 @@
 import type { QueueEventMap, QueueExecution, QueueStoreInterface, StoredEntry } from '@src/core'
-import type { TestGateInterface } from '../../setup.js'
 import { describe, expect, it } from 'vitest'
 import { stringShape } from '@orkestrel/contract'
 import {
@@ -11,16 +10,11 @@ import {
 	isQueueTimeout,
 	Queue,
 } from '@src/core'
-import { createRecorder, waitForDelay } from '@orkestrel/test'
-import {
-	createErrorRecorder,
-	createGate,
-	recordEmitterEvents,
-	requireElement,
-} from '../../setup.js'
+import { createRecorder, requireValue, waitForDelay } from '@orkestrel/test'
+import { recordEmitterEvents } from '../../setup.js'
 
 // src/core/Queue.ts — the cooperative concurrent job engine. Real behaviour,
-// no mocks: handlers are gated on manually-settled promises (createGate) so ordering /
+// no mocks: handlers are gated on manually-settled promises (Promise.withResolvers) so ordering /
 // concurrency / pause are deterministic, and a real short Timeout drives the timeout
 // test. A recorder counts handler invocations (AGENTS §16). Beyond the per-feature
 // cases, production-grade stress sections cover: high concurrency × many entries (120
@@ -54,7 +48,11 @@ describe('Queue — enqueue + FIFO (concurrency 1)', () => {
 
 describe('Queue — bounded concurrency', () => {
 	it('runs at most `concurrency` entries at once; the surplus waits', async () => {
-		const gates = [createGate(), createGate(), createGate()]
+		const gates = [
+			Promise.withResolvers<void>(),
+			Promise.withResolvers<void>(),
+			Promise.withResolvers<void>(),
+		]
 		let live = 0
 		let peak = 0
 		const started = createRecorder<[number]>()
@@ -64,7 +62,7 @@ describe('Queue — bounded concurrency', () => {
 				started.handler(input)
 				live += 1
 				peak = Math.max(peak, live)
-				await requireElement(gates, input).promise
+				await requireValue(gates[input]).promise
 				live -= 1
 			},
 		})
@@ -78,14 +76,14 @@ describe('Queue — bounded concurrency', () => {
 			expect(started.count).toBe(2)
 			expect(queue.active).toBe(2)
 
-			requireElement(gates, 0).resolve()
+			requireValue(gates[0]).resolve()
 			await waitForDelay(10)
 			// Freeing one slot lets the third start; still never more than two at once.
 			expect(started.count).toBe(3)
 			expect(queue.active).toBe(2)
 
-			requireElement(gates, 1).resolve()
-			requireElement(gates, 2).resolve()
+			requireValue(gates[1]).resolve()
+			requireValue(gates[2]).resolve()
 			await all
 			expect(peak).toBe(2)
 			expect(queue.active).toBe(0)
@@ -160,7 +158,7 @@ describe('Queue — per-attempt timeout', () => {
 
 describe('Queue — abort', () => {
 	it('rejects pending entries and fires the in-flight handler signal; no retries', async () => {
-		const gate = createGate()
+		const gate = Promise.withResolvers<void>()
 		const fired = createRecorder<[]>()
 		const attempts = createRecorder<[]>()
 		const queue = new Queue<string, void>({
@@ -222,7 +220,7 @@ describe('Queue — pause / resume', () => {
 
 describe('Queue — clear', () => {
 	it('drops pending entries (rejected) and leaves the in-flight one running', async () => {
-		const gate = createGate<number>()
+		const gate = Promise.withResolvers<number>()
 		const queue = new Queue<number, number>({
 			concurrency: 1,
 			handler: (input) => (input === 0 ? gate.promise : Promise.resolve(input)),
@@ -264,7 +262,7 @@ describe('Queue — stop / destroy', () => {
 	})
 
 	it('destroy aborts in-flight, rejects pending, and is idempotent', async () => {
-		const gate = createGate()
+		const gate = Promise.withResolvers<void>()
 		const queue = new Queue<string, void>({
 			concurrency: 1,
 			handler: () => gate.promise,
@@ -338,7 +336,7 @@ function failingSaveStore(): {
 describe('Queue — durability: persist on accept, remove on settle', () => {
 	it('saves an entry on enqueue and removes it once it completes', async () => {
 		const store = createMemoryQueueStore(stringShape())
-		const gate = createGate<string>()
+		const gate = Promise.withResolvers<string>()
 		const queue = new Queue<string, string>({ store, handler: () => gate.promise })
 
 		const running = queue.enqueue('a')
@@ -371,7 +369,11 @@ describe('Queue — durability: persist on accept, remove on settle', () => {
 
 	it('climbs the persisted attempt count across retries, empty after success', async () => {
 		const store = createMemoryQueueStore(stringShape())
-		const gates = [createGate(), createGate(), createGate()]
+		const gates = [
+			Promise.withResolvers<void>(),
+			Promise.withResolvers<void>(),
+			Promise.withResolvers<void>(),
+		]
 		const attempts = createRecorder<[]>()
 		const queue = new Queue<string, string>({
 			store,
@@ -379,7 +381,7 @@ describe('Queue — durability: persist on accept, remove on settle', () => {
 			handler: async () => {
 				const index = attempts.count
 				attempts.handler()
-				await requireElement(gates, index).promise
+				await requireValue(gates[index]).promise
 				if (index < 2) throw new Error('not yet')
 				return 'ok'
 			},
@@ -393,17 +395,17 @@ describe('Queue — durability: persist on accept, remove on settle', () => {
 			expect((await store.load())[0]?.attempts).toBe(0)
 
 			// Fail attempt 0 → the queue retries; the climbing count is persisted (attempts 1).
-			requireElement(gates, 0).resolve()
+			requireValue(gates[0]).resolve()
 			await waitForDelay(10)
 			expect((await store.load())[0]?.attempts).toBe(1)
 
 			// Fail attempt 1 → retry again, persisted at attempts 2.
-			requireElement(gates, 1).resolve()
+			requireValue(gates[1]).resolve()
 			await waitForDelay(10)
 			expect((await store.load())[0]?.attempts).toBe(2)
 
 			// Attempt 2 succeeds → the row is removed.
-			requireElement(gates, 2).resolve()
+			requireValue(gates[2]).resolve()
 			await expect(running).resolves.toBe('ok')
 			expect(await store.load()).toEqual([])
 		} finally {
@@ -498,7 +500,7 @@ describe('Queue — durability: restore (restart simulation)', () => {
 describe('Queue — durability: lifecycle drains remove rows', () => {
 	it('clear removes the drained pending rows; an in-flight row is removed on settle', async () => {
 		const store = createMemoryQueueStore(stringShape())
-		const gate = createGate<string>()
+		const gate = Promise.withResolvers<string>()
 		const queue = new Queue<string, string>({
 			store,
 			concurrency: 1,
@@ -527,7 +529,7 @@ describe('Queue — durability: lifecycle drains remove rows', () => {
 
 	it('abort removes the drained pending rows', async () => {
 		const store = createMemoryQueueStore(stringShape())
-		const gate = createGate<string>()
+		const gate = Promise.withResolvers<string>()
 		const queue = new Queue<string, string>({
 			store,
 			concurrency: 1,
@@ -617,7 +619,7 @@ describe('Queue — durability: save failures', () => {
 
 describe('Queue — per-entry signal abort', () => {
 	it('rejects only the signalled entry with its reason and never retries it', async () => {
-		const gate = createGate()
+		const gate = Promise.withResolvers<void>()
 		const fired = createRecorder<[]>()
 		const attempts = createRecorder<[string]>()
 		const queue = new Queue<string, void>({
@@ -665,7 +667,7 @@ describe('Queue — per-entry signal abort', () => {
 	})
 
 	it('the entry signal wins the 3-way race over the deadline (aborted, not timed out)', async () => {
-		const gate = createGate()
+		const gate = Promise.withResolvers<void>()
 		const fired = createRecorder<[]>()
 		const queue = new Queue<string, void>({
 			timeout: 100, // a far-off deadline the entry signal must beat
@@ -708,8 +710,8 @@ describe('Queue — restore on a live queue (no double-execution)', () => {
 		const inputs: readonly string[] = ['one', 'two', 'three']
 		// One gate per input, pre-seeded so the handler only LOOKS one up (typed `void` so
 		// `resolve()` takes no argument).
-		const gates = new Map<string, TestGateInterface<void>>(
-			inputs.map((input) => [input, createGate<void>()]),
+		const gates = new Map<string, PromiseWithResolvers<void>>(
+			inputs.map((input) => [input, Promise.withResolvers<void>()]),
 		)
 		const seen = createRecorder<[string]>()
 		// concurrency 2 so two enqueued entries are in-flight (gated) while a third stays
@@ -752,7 +754,7 @@ describe('Queue — restore on a live queue (no double-execution)', () => {
 describe('Queue — restore racing abort/destroy', () => {
 	it('launches nothing when the queue is aborted during the load() await', async () => {
 		// A real store whose `load()` blocks on a gate, so we can abort the queue mid-load.
-		const loadGate = createGate<ReadonlyArray<StoredEntry<string>>>()
+		const loadGate = Promise.withResolvers<ReadonlyArray<StoredEntry<string>>>()
 		const seen = createRecorder<[string]>()
 		const store: QueueStoreInterface<string> = {
 			async save() {},
@@ -817,7 +819,7 @@ describe('Queue — start idempotency and stop/start resume', () => {
 	})
 
 	it('resumes new work after stop() then start() (stop rejects pending)', async () => {
-		const gate = createGate<number>()
+		const gate = Promise.withResolvers<number>()
 		const seen = createRecorder<[number]>()
 		const queue = new Queue<number, number>({
 			concurrency: 1,
@@ -1181,7 +1183,7 @@ describe('Queue — store remove failures under churn', () => {
 
 	it('clears pending rows in-memory even when the store rejects the drain remove', async () => {
 		const removes = createRecorder<[string]>()
-		const gate = createGate<string>()
+		const gate = Promise.withResolvers<string>()
 		const store: QueueStoreInterface<string> = {
 			async save() {},
 			async remove(id) {
@@ -1299,7 +1301,7 @@ describe('Queue — restore at scale + racing a concurrent enqueue', () => {
 		await store.save({ id: 'shared', input: 'from-store', attempts: 0 })
 
 		const seen = createRecorder<[string, string]>()
-		const gate = createGate<string>()
+		const gate = Promise.withResolvers<string>()
 		const queue = new Queue<string, string>({
 			store,
 			concurrency: 2,
@@ -1335,13 +1337,17 @@ describe('Queue — restore at scale + racing a concurrent enqueue', () => {
 
 describe('Queue — wake-park under saturation has no stuck entry', () => {
 	it('runs a surplus entry the moment a slot frees (no lost wake)', async () => {
-		const gates = [createGate(), createGate(), createGate()]
+		const gates = [
+			Promise.withResolvers<void>(),
+			Promise.withResolvers<void>(),
+			Promise.withResolvers<void>(),
+		]
 		const started = createRecorder<[number]>()
 		const queue = new Queue<number, number>({
 			concurrency: 2,
 			handler: async (input) => {
 				started.handler(input)
-				await requireElement(gates, input).promise
+				await requireValue(gates[input]).promise
 				return input
 			},
 		})
@@ -1357,12 +1363,12 @@ describe('Queue — wake-park under saturation has no stuck entry', () => {
 			expect(started.count).toBe(2) // only two started; the third is parked
 
 			// Free exactly one slot — the parked third entry must wake and start promptly.
-			requireElement(gates, 0).resolve()
+			requireValue(gates[0]).resolve()
 			await waitForDelay(10)
 			expect(started.calls.map(([input]) => input).sort()).toEqual([0, 1, 2])
 
-			requireElement(gates, 1).resolve()
-			requireElement(gates, 2).resolve()
+			requireValue(gates[1]).resolve()
+			requireValue(gates[2]).resolve()
 			await all
 			expect(queue.count).toBe(0)
 			expect(queue.active).toBe(0)
@@ -1457,7 +1463,7 @@ describe('Queue — emitter (push observation surface)', () => {
 	})
 
 	it('fires abort when the queue is aborted, rejecting the in-flight + pending entries', async () => {
-		const gate = createGate()
+		const gate = Promise.withResolvers<void>()
 		const queue = new Queue<string, void>({ concurrency: 1, handler: () => gate.promise })
 		const events = recordEmitterEvents(queue.emitter, QUEUE_EVENTS)
 		const running = queue.enqueue('inflight', { id: 'a' })
@@ -1491,7 +1497,7 @@ describe('Queue — emitter (push observation surface)', () => {
 	it('EMIT SAFETY: a throwing success listener cannot corrupt the engine, and routes EVERY throw to the error handler', async () => {
 		const thrown = new Error('observer blew up')
 		const ran = createRecorder<[number]>()
-		const errors = createErrorRecorder()
+		const errors = createRecorder<readonly [error: unknown, event: string]>()
 		const queue = new Queue<number, number>({
 			concurrency: 2,
 			error: errors.handler,
@@ -1527,7 +1533,7 @@ describe('Queue — emitter (push observation surface)', () => {
 	})
 
 	it('EMIT SAFETY: a throwing error handler neither escapes nor recurses', async () => {
-		const errors = createErrorRecorder()
+		const errors = createRecorder<readonly [error: unknown, event: string]>()
 		const queue = new Queue<number, number>({
 			handler: (input) => input,
 			error: (error, event) => {
@@ -1551,7 +1557,7 @@ describe('Queue — emitter (push observation surface)', () => {
 
 	it('EMIT SAFETY: a throwing enqueue listener does not strand the worker (the entry still runs)', async () => {
 		const ran = createRecorder<[number]>()
-		const errors = createErrorRecorder()
+		const errors = createRecorder<readonly [error: unknown, event: string]>()
 		const queue = new Queue<number, number>({
 			error: errors.handler,
 			handler: (input) => {
@@ -1654,7 +1660,7 @@ describe('Queue numeric contracts', () => {
 	})
 
 	it('uses constructor defaults only for explicit undefined numeric options', async () => {
-		const gates = [createGate<number>(), createGate<number>()]
+		const gates = [Promise.withResolvers<number>(), Promise.withResolvers<number>()]
 		const attempts = createRecorder<[number]>()
 		const failure = new Error('default retries exhausted')
 		const constructed: unknown = Reflect.construct(Queue, [
@@ -1664,7 +1670,7 @@ describe('Queue numeric contracts', () => {
 				timeout: undefined,
 				handler: async (input: number) => {
 					attempts.handler(input)
-					await requireElement(gates, input).promise
+					await requireValue(gates[input]).promise
 					if (input === 0) throw failure
 					return input
 				},
@@ -1677,13 +1683,13 @@ describe('Queue numeric contracts', () => {
 
 		try {
 			expect(constructed.active).toBe(1)
-			requireElement(gates, 0).resolve(0)
+			requireValue(gates[0]).resolve(0)
 			await waitForDelay(0)
 			expect(attempts.calls).toEqual([[0], [1]])
 			expect(constructed.active).toBe(1)
 			await waitForDelay(5)
 			expect(constructed.active).toBe(1)
-			requireElement(gates, 1).resolve(1)
+			requireValue(gates[1]).resolve(1)
 			expect(await all).toEqual([
 				{ status: 'rejected', reason: failure },
 				{ status: 'fulfilled', value: 1 },
@@ -1699,8 +1705,8 @@ describe('Queue numeric contracts', () => {
 		const reads = createRecorder<[string]>()
 		const initialEnqueue = createRecorder<[string]>()
 		const laterEnqueue = createRecorder<[string]>()
-		const initialErrors = createErrorRecorder()
-		const laterErrors = createErrorRecorder()
+		const initialErrors = createRecorder<readonly [error: unknown, event: string]>()
+		const laterErrors = createRecorder<readonly [error: unknown, event: string]>()
 		const listenerFailure = new Error('constructor listener failure')
 		let concurrencyReads = 0
 		let retriesReads = 0
@@ -1755,7 +1761,7 @@ describe('Queue numeric contracts', () => {
 
 	it('fails each invalid numeric constructor option before reading later options', () => {
 		const reads = createRecorder<[string]>()
-		const errors = createErrorRecorder()
+		const errors = createRecorder<readonly [error: unknown, event: string]>()
 		let concurrency = 0
 		let retries = 0
 		let timeout = 0
@@ -1880,7 +1886,7 @@ describe('Queue serialized durable admission', () => {
 	})
 
 	it('preserves enqueue order even when the first save is delayed', async () => {
-		const first = createGate<void>()
+		const first = Promise.withResolvers<void>()
 		const saves = createRecorder<[number]>()
 		const order = createRecorder<[number]>()
 		const entries = new Map<string, StoredEntry<number>>()
@@ -1952,7 +1958,7 @@ describe('Queue coordinated lifecycle', () => {
 	})
 
 	it('rejects a stale admission stopped before its save completes', async () => {
-		const save = createGate<void>()
+		const save = Promise.withResolvers<void>()
 		const removals = createRecorder<[string]>()
 		const store: QueueStoreInterface<string> = {
 			async save() {
@@ -1992,7 +1998,7 @@ describe('Queue coordinated lifecycle', () => {
 	})
 
 	it('destroys the emitter last and returns the same idempotent promise', async () => {
-		const removal = createGate<void>()
+		const removal = Promise.withResolvers<void>()
 		const store: QueueStoreInterface<string> = {
 			async save() {},
 			async remove() {
@@ -2166,8 +2172,8 @@ describe('Queue — reentrant lifecycle barriers', () => {
 		})
 
 		const aborting = queue.abort()
-		const nestedAbort = requireElement(reentrant, 0)
-		const nestedDestroy = requireElement(reentrant, 1)
+		const nestedAbort = requireValue(reentrant[0])
+		const nestedDestroy = requireValue(reentrant[1])
 		expect(nestedAbort).toBe(aborting)
 		expect(queue.abort()).toBe(aborting)
 		expect(queue.destroy()).toBe(nestedDestroy)
@@ -2185,7 +2191,7 @@ describe('Queue — reentrant lifecycle barriers', () => {
 
 		await expect(pending).rejects.toThrow('stopped')
 		await stopping
-		expect(requireElement(reentrant, 0)).toBe(stopping)
+		expect(requireValue(reentrant[0])).toBe(stopping)
 		expect(queue.stop()).toBe(stopping)
 	})
 
@@ -2199,7 +2205,7 @@ describe('Queue — reentrant lifecycle barriers', () => {
 
 		await expect(pending).rejects.toBeDefined()
 		await aborting
-		expect(requireElement(reentrant, 0)).toBe(aborting)
+		expect(requireValue(reentrant[0])).toBe(aborting)
 		expect(queue.abort()).toBe(aborting)
 	})
 
@@ -2213,14 +2219,14 @@ describe('Queue — reentrant lifecycle barriers', () => {
 
 		await expect(pending).rejects.toBeDefined()
 		await destroying
-		expect(requireElement(reentrant, 0)).toBe(destroying)
+		expect(requireValue(reentrant[0])).toBe(destroying)
 		expect(queue.destroy()).toBe(destroying)
 	})
 })
 
 describe('Queue — atomic claims and stale restore generations', () => {
 	it('claims an entry as active before same-turn stop and waits for it to settle', async () => {
-		const gate = createGate<number>()
+		const gate = Promise.withResolvers<number>()
 		const queue = new Queue<number, number>({ handler: () => gate.promise })
 		const running = queue.enqueue(1)
 		expect(queue.active).toBe(1)
@@ -2234,7 +2240,7 @@ describe('Queue — atomic claims and stale restore generations', () => {
 	})
 
 	it('leaves a same-turn claimed entry active across clear', async () => {
-		const gate = createGate<number>()
+		const gate = Promise.withResolvers<number>()
 		const queue = new Queue<number, number>({ handler: () => gate.promise })
 		const running = queue.enqueue(1)
 		expect(queue.active).toBe(1)
@@ -2246,7 +2252,7 @@ describe('Queue — atomic claims and stale restore generations', () => {
 	})
 
 	it('ignores a restore load that completes after stop and start change generation', async () => {
-		const load = createGate<ReadonlyArray<StoredEntry<string>>>()
+		const load = Promise.withResolvers<ReadonlyArray<StoredEntry<string>>>()
 		const handled = createRecorder<[string]>()
 		const enqueued = createRecorder<[string]>()
 		const store: QueueStoreInterface<string> = {
@@ -2281,7 +2287,7 @@ describe('Queue — atomic claims and stale restore generations', () => {
 
 describe('Queue — exclusive cleanup ownership and lifecycle visibility', () => {
 	it('shares overlapping cleanup, retries a failure, then safely reuses the id', async () => {
-		const first = createGate<void>()
+		const first = Promise.withResolvers<void>()
 		const removes = createRecorder<[string]>()
 		let fail = true
 		const store: QueueStoreInterface<string> = {
@@ -2328,7 +2334,7 @@ describe('Queue — exclusive cleanup ownership and lifecycle visibility', () =>
 	})
 
 	it('propagates active cleanup failure through stop and the entry result', async () => {
-		const gate = createGate<string>()
+		const gate = Promise.withResolvers<string>()
 		const store: QueueStoreInterface<string> = {
 			async save() {},
 			async remove() {
@@ -2353,7 +2359,7 @@ describe('Queue — exclusive cleanup ownership and lifecycle visibility', () =>
 	})
 
 	it('propagates active cleanup failure through abort and the entry result', async () => {
-		const gate = createGate<string>()
+		const gate = Promise.withResolvers<string>()
 		const store: QueueStoreInterface<string> = {
 			async save() {},
 			async remove() {
@@ -2411,7 +2417,7 @@ describe('Queue — exclusive cleanup ownership and lifecycle visibility', () =>
 
 describe('Queue — active cleanup and handler failure isolation', () => {
 	it('clear neither waits for nor inherits active cleanup failure', async () => {
-		const removal = createGate<void>()
+		const removal = Promise.withResolvers<void>()
 		const removes = createRecorder<[]>()
 		let fail = true
 		const store: QueueStoreInterface<string> = {
@@ -2668,7 +2674,7 @@ describe('Queue — reentrant terminal drain ordering', () => {
 		queue.emitter.on('drain', () => order.push('drain'))
 
 		await expect(queue.enqueue(1, { id: 'first' })).resolves.toBe(1)
-		await expect(requireElement(reentrant, 0)).resolves.toBe(2)
+		await expect(requireValue(reentrant[0])).resolves.toBe(2)
 		expect(order).toEqual(['success:first', 'drain', 'success:second', 'drain'])
 	})
 
@@ -2689,7 +2695,7 @@ describe('Queue — reentrant terminal drain ordering', () => {
 		queue.emitter.on('drain', () => order.push('drain'))
 
 		await expect(queue.enqueue('bad', { id: 'first' })).rejects.toThrow('bad')
-		await expect(requireElement(reentrant, 0)).resolves.toBe('good')
+		await expect(requireValue(reentrant[0])).resolves.toBe('good')
 		expect(order).toEqual(['failure:first', 'drain', 'success:second', 'drain'])
 	})
 })

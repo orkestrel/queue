@@ -8,62 +8,7 @@ import { createRecorder } from '@orkestrel/test'
 // helpers with no `node:*` / DOM dependency, so it is safe for `src:core` alike.
 //
 // The fleet-wide helpers live in `@orkestrel/test`. What remains here is what is
-// specific to this package: the emitter recorder bundles and test-collection helpers.
-
-/** A manually-settled promise — the `resolve` / `reject` lifted out of its executor. */
-export interface TestGateInterface<T> {
-	readonly promise: Promise<T>
-	readonly resolve: (value: T) => void
-	readonly reject: (error: unknown) => void
-}
-
-/**
- * Create a {@link TestGateInterface} — a deferred whose `promise` settles only when
- * the test calls `resolve` / `reject`. Lets a test gate a real handler on a signal it
- * controls, to prove ordering / concurrency / pause behaviour without racing wall-clock
- * timers (AGENTS §16.1).
- *
- * @typeParam T - The value the gate's `promise` resolves with
- * @returns A gate exposing its `promise` and its `resolve` / `reject`
- */
-export function createGate<T = void>(): TestGateInterface<T> {
-	let resolve: (value: T) => void = () => {}
-	let reject: (error: unknown) => void = () => {}
-	const promise = new Promise<T>((res, rej) => {
-		resolve = res
-		reject = rej
-	})
-	return { promise, resolve, reject }
-}
-
-/**
- * Require one indexed element from a test collection.
- *
- * @typeParam T - The collection element type
- * @param values - The collection to read
- * @param index - The zero-based index to require
- * @returns The element at `index`
- * @throws {Error} When `index` has no element
- */
-export function requireElement<T>(values: readonly T[], index: number): T {
-	const value = values[index]
-	if (value === undefined) throw new Error(`Missing test element at index ${String(index)}`)
-	return value
-}
-
-/**
- * Create a recorder for an {@link import('@orkestrel/emitter').EmitterErrorHandler} — the
- * emitter's own listener-error channel (AGENTS §13): a `RecorderInterface<[error, event]>`
- * whose `handler` is wired as the `error` option, so an emit-safety test asserts a buggy
- * listener's throw was routed here (with the offending event name) instead of corrupting the
- * entity. Argument order is `(error, event)`, matching `EmitterErrorHandler`. A thin alias over
- * `createRecorder` (AGENTS §16.1 — extract-once over the per-entity emit-safety blocks).
- *
- * @returns A recorder of `[error: unknown, event: string]` calls
- */
-export function createErrorRecorder(): RecorderInterface<readonly [error: unknown, event: string]> {
-	return createRecorder<readonly [error: unknown, event: string]>()
-}
+// specific to this package: the emitter recorder bundles.
 
 /** A recorder per named event of an {@link EmitterInterface}, keyed by event name. */
 export type EmitterRecorders<TMap extends EventMap, TName extends keyof TMap> = {
@@ -122,10 +67,4 @@ export function isTotal<TMap extends EventMap, TName extends keyof TMap>(
 	events: readonly TName[],
 ): recorders is EmitterRecorders<TMap, TName> {
 	return events.every((name) => recorders[name] !== undefined)
-}
-
-/** Whether a repository-relative Vue SFC path belongs to the private browser application. */
-export function isBrowserVuePath(path: string): boolean {
-	const normalized = path.replaceAll('\\', '/')
-	return normalized.startsWith('app/browser/')
 }
