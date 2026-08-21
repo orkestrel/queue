@@ -10,8 +10,7 @@ import {
 	isQueueTimeout,
 	Queue,
 } from '@src/core'
-import { createRecorder, requireValue, waitForDelay } from '@orkestrel/test'
-import { recordEmitterEvents } from '../../setup.js'
+import { createRecorder, createRecorders, requireValue, waitForDelay } from '@orkestrel/test'
 
 // src/core/Queue.ts — the cooperative concurrent job engine. Real behaviour,
 // no mocks: handlers are gated on manually-settled promises (Promise.withResolvers) so ordering /
@@ -1392,23 +1391,21 @@ describe('Queue — wake-park under saturation has no stuck entry', () => {
 // guarantee — a throwing observer cannot corrupt the engine (the queue still drains,
 // `#active`/`count` stay balanced, no parked worker is stranded), yet the `error` handler fires.
 
-// The QueueEventMap event names recorded across the emitter tests — fed to the shared
-// `recordEmitterEvents` (AGENTS §16.1: the per-event wiring is centralized; this file
+// The QueueEventMap event names recorded across the emitter tests — fed to
+// `createRecorders` from `@orkestrel/test` (the per-event wiring lives there; this file
 // keeps only the names its scenarios observe).
-const QUEUE_EVENTS: ReadonlyArray<keyof QueueEventMap<unknown>> = [
-	'enqueue',
-	'start',
-	'retry',
-	'success',
-	'failure',
-	'abort',
-	'drain',
-]
+const QUEUE_EVENTS = ['enqueue', 'start', 'retry', 'success', 'failure', 'abort', 'drain'] as const
+
+// The recorded-name union, derived from the list rather than from `keyof QueueEventMap`:
+// `createRecorders` takes its names as a type argument (nothing infers them from the
+// emitter), and a union wider than the list would type an unwired key as a recorder while
+// it reads `undefined`.
+type QueueEvent = (typeof QUEUE_EVENTS)[number]
 
 describe('Queue — emitter (push observation surface)', () => {
 	it('a single entry fires enqueue → start → success → drain with the right payloads', async () => {
 		const queue = new Queue<number, number>({ handler: (input) => input * 2 })
-		const events = recordEmitterEvents(queue.emitter, QUEUE_EVENTS)
+		const events = createRecorders<QueueEventMap<number>, QueueEvent>(queue.emitter, QUEUE_EVENTS)
 		const result = await queue.enqueue(21, { id: 'job-1' })
 		expect(result).toBe(42)
 		await waitForDelay(0) // let the worker's post-settle drain detection run
@@ -1433,7 +1430,7 @@ describe('Queue — emitter (push observation surface)', () => {
 				return 'ok'
 			},
 		})
-		const events = recordEmitterEvents(queue.emitter, QUEUE_EVENTS)
+		const events = createRecorders<QueueEventMap<string>, QueueEvent>(queue.emitter, QUEUE_EVENTS)
 		await expect(queue.enqueue('a', { id: 'r' })).resolves.toBe('ok')
 		// `start` once; two retries (attempts 1 and 2, 1-based) before the third attempt won.
 		expect(events.start.calls).toEqual([['r']])
@@ -1453,7 +1450,7 @@ describe('Queue — emitter (push observation surface)', () => {
 				throw error
 			},
 		})
-		const events = recordEmitterEvents(queue.emitter, QUEUE_EVENTS)
+		const events = createRecorders<QueueEventMap<void>, QueueEvent>(queue.emitter, QUEUE_EVENTS)
 		await expect(queue.enqueue(undefined, { id: 'doomed' })).rejects.toThrow('always fails')
 		expect(events.start.calls).toEqual([['doomed']])
 		expect(events.retry.calls).toEqual([['doomed', 1]]) // one retry (retries: 1)
@@ -1465,7 +1462,7 @@ describe('Queue — emitter (push observation surface)', () => {
 	it('fires abort when the queue is aborted, rejecting the in-flight + pending entries', async () => {
 		const gate = Promise.withResolvers<void>()
 		const queue = new Queue<string, void>({ concurrency: 1, handler: () => gate.promise })
-		const events = recordEmitterEvents(queue.emitter, QUEUE_EVENTS)
+		const events = createRecorders<QueueEventMap<void>, QueueEvent>(queue.emitter, QUEUE_EVENTS)
 		const running = queue.enqueue('inflight', { id: 'a' })
 		const waiting = queue.enqueue('pending', { id: 'b' })
 		await waitForDelay(10)
@@ -1987,7 +1984,7 @@ describe('Queue coordinated lifecycle', () => {
 	it('emits one drain for a pending-only transition to idle', async () => {
 		const queue = new Queue<number, number>({ handler: (input) => input })
 		queue.pause()
-		const events = recordEmitterEvents<QueueEventMap<number>, 'drain'>(queue.emitter, ['drain'])
+		const events = createRecorders<QueueEventMap<number>, 'drain'>(queue.emitter, ['drain'])
 		const pending = queue.enqueue(1)
 		const clearing = queue.clear()
 		await expect(pending).rejects.toThrow('cleared')
