@@ -102,8 +102,9 @@ Exported from `@orkestrel/scaffold`, and reachable from
 | `ENGINES_PATTERN`                 | const | The minimum-Node engine syntax a blueprint declares.                                             |
 | `ENVIRONMENTS`                    | const | The three `Environment` values, frozen.                                                          |
 | `EXECUTABLE_PATHS`                | const | The vendored paths a target receives with its executable bit set, frozen.                        |
-| `EXTRA_NAME_PATTERN`              | const | The development extra name syntax: any valid npm package name.                                   |
 | `EXTRA_RANGE_PATTERN`             | const | The registry-only semver subset accepted for a development extra's range.                        |
+| `FLOOR_RANGE_PATTERN`             | const | The exact three-component floor accepted for a foreign peer's range.                             |
+| `FOREIGN_NAME_PATTERN`            | const | The package name syntax for a dependency this package does not publish.                          |
 | `GLOBAL_SETUP_PATH`               | const | The shared Vitest global-setup module whose presence makes a workspace `global`.                 |
 | `GROUPS`                          | const | The seven `Group` values in plan order, frozen.                                                  |
 | `GUIDES_TEST_PATH`                | const | The guide-parity proof whose presence selects the planned `guides` project.                      |
@@ -587,14 +588,14 @@ blueprint.engines // '>=22.12.0'
 
 `src` selects published library environments and `app` selects private application environments.
 The two axes are independent, so a library-only, an application-only, and a mixed workspace are all
-first class. `dependencies` and `peers` are runtime `@orkestrel/*` packages; `extras` are
-development dependencies and may carry any valid npm name. A peer therefore reaches the generated
-workspace through two sets with different membership rules: `Blueprint.peers`, which a blocking
-question closes to `@orkestrel/*`, and the `peers` binding the generated `vite.config.ts` derives
-from the target's own `peerDependencies`, which carries every name that manifest declares. Each
-published build face — core, browser, server, and `bin` — externalizes every name in that binding,
-so a peer the workspace declares by hand, such as `vitest`, is left as an import in the emitted
-bundle rather than inlined into it.
+first class. `dependencies` are runtime `@orkestrel/*` packages. A peer in the `@orkestrel` scope is
+a fleet pin; every other peer is a floor. `extras` are development dependencies and may carry any
+valid npm name. A peer reaches the generated workspace through two representations:
+`Blueprint.peers` validates the scope rule and compiles the manifest declarations, while the
+`peers` binding in the generated `vite.config.ts` derives from the target's live
+`peerDependencies`. Each published build face — core, browser, server, and `bin` — externalizes
+every name in that binding, so a peer the workspace declares by hand, such as `vitest`, is left as
+an import in the emitted bundle rather than inlined into it.
 
 One published environment owns the package root directly. Several published environments require
 `core`, which owns that root while each other environment keeps its subpath. A multi-environment
