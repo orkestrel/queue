@@ -16,7 +16,14 @@ import { isString, preview } from '@orkestrel/contract'
 import { Emitter } from '@orkestrel/emitter'
 import { createTimeout } from '@orkestrel/timeout'
 import { isQueueError, QueueError } from './errors.js'
-import { isQueueConcurrency, isQueueRetries, isQueueSignal, isQueueTimeout } from './validators.js'
+import { readOption, validateOption } from './helpers.js'
+import {
+	isQueueConcurrency,
+	isQueueRetries,
+	isQueueSignal,
+	isQueueTimeout,
+	isStoredEntry,
+} from './validators.js'
 
 /**
  * A concurrent, cooperative FIFO job queue with optional outstanding-work persistence.
@@ -63,8 +70,6 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	#generation = 0
 	#paused = false
 	#stopped = false
-	#aborted = false
-	#destroyed = false
 	#drained = true
 
 	/**
@@ -74,29 +79,26 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	 */
 	constructor(options: QueueOptions<TInput, TResult>) {
 		const configuredConcurrency = options.concurrency
-		const concurrency = configuredConcurrency === undefined ? 1 : configuredConcurrency
-		if (!isQueueConcurrency(concurrency)) {
-			throw new QueueError('queue concurrency must be a positive safe integer', {
-				code: 'invalid',
-				context: { option: 'concurrency', value: concurrency },
-			})
-		}
+		const concurrency = validateOption(
+			configuredConcurrency === undefined ? 1 : configuredConcurrency,
+			isQueueConcurrency,
+			'concurrency',
+			'queue concurrency must be a positive safe integer',
+		)
 		const configuredRetries = options.retries
-		const retries = configuredRetries === undefined ? 0 : configuredRetries
-		if (!isQueueRetries(retries)) {
-			throw new QueueError('queue retries must be a nonnegative safe integer', {
-				code: 'invalid',
-				context: { option: 'retries', value: retries },
-			})
-		}
+		const retries = validateOption(
+			configuredRetries === undefined ? 0 : configuredRetries,
+			isQueueRetries,
+			'retries',
+			'queue retries must be a nonnegative safe integer',
+		)
 		const configuredTimeout = options.timeout
-		const timeout = configuredTimeout === undefined ? 0 : configuredTimeout
-		if (!isQueueTimeout(timeout)) {
-			throw new QueueError('queue timeout must be within the native timer range', {
-				code: 'invalid',
-				context: { option: 'timeout', value: timeout },
-			})
-		}
+		const timeout = validateOption(
+			configuredTimeout === undefined ? 0 : configuredTimeout,
+			isQueueTimeout,
+			'timeout',
+			'queue timeout must be within the native timer range',
+		)
 		const on = options.on
 		const error = options.error
 		this.#handler = options.handler
@@ -127,7 +129,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	}
 
 	get stopped(): boolean {
-		return this.#stopped || this.#aborted
+		return this.#stopped || this.#abortPromise !== undefined
 	}
 
 	/**
@@ -139,70 +141,36 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	 * @throws {QueueError} Synchronously when an option is inaccessible or invalid
 	 */
 	enqueue(input: TInput, options?: QueueEntryOptions): Promise<TResult> {
-		let supplied: unknown
-		try {
-			supplied = options?.id
-		} catch (error: unknown) {
-			throw new QueueError('queue entry id could not be read', {
-				code: 'invalid',
-				cause: error,
-				context: { option: 'id' },
-			})
-		}
-		if (supplied !== undefined && !isString(supplied)) {
-			throw new QueueError('queue entry id must be a string', {
-				code: 'invalid',
-				context: { option: 'id', value: supplied },
-			})
-		}
-		let retries: unknown
-		try {
-			retries = options?.retries
-		} catch (error: unknown) {
-			throw new QueueError('queue retries could not be read', {
-				code: 'invalid',
-				cause: error,
-				context: { option: 'retries' },
-			})
-		}
-		if (retries !== undefined && !isQueueRetries(retries)) {
-			throw new QueueError('queue retries must be a nonnegative safe integer', {
-				code: 'invalid',
-				context: { option: 'retries', value: retries },
-			})
-		}
-		let timeout: unknown
-		try {
-			timeout = options?.timeout
-		} catch (error: unknown) {
-			throw new QueueError('queue timeout could not be read', {
-				code: 'invalid',
-				cause: error,
-				context: { option: 'timeout' },
-			})
-		}
-		if (timeout !== undefined && !isQueueTimeout(timeout)) {
-			throw new QueueError('queue timeout must be within the native timer range', {
-				code: 'invalid',
-				context: { option: 'timeout', value: timeout },
-			})
-		}
-		let signal: unknown
-		try {
-			signal = options?.signal
-		} catch (error: unknown) {
-			throw new QueueError('queue signal could not be read', {
-				code: 'invalid',
-				cause: error,
-				context: { option: 'signal' },
-			})
-		}
-		if (signal !== undefined && !isQueueSignal(signal)) {
-			throw new QueueError('queue signal must be an AbortSignal', {
-				code: 'invalid',
-				context: { option: 'signal', value: signal },
-			})
-		}
+		const rawId = readOption(options, 'id', 'queue entry id could not be read')
+		const supplied =
+			rawId === undefined
+				? undefined
+				: validateOption(rawId, isString, 'id', 'queue entry id must be a string')
+		const rawRetries = readOption(options, 'retries', 'queue retries could not be read')
+		const retries =
+			rawRetries === undefined
+				? undefined
+				: validateOption(
+						rawRetries,
+						isQueueRetries,
+						'retries',
+						'queue retries must be a nonnegative safe integer',
+					)
+		const rawTimeout = readOption(options, 'timeout', 'queue timeout could not be read')
+		const timeout =
+			rawTimeout === undefined
+				? undefined
+				: validateOption(
+						rawTimeout,
+						isQueueTimeout,
+						'timeout',
+						'queue timeout must be within the native timer range',
+					)
+		const rawSignal = readOption(options, 'signal', 'queue signal could not be read')
+		const signal =
+			rawSignal === undefined
+				? undefined
+				: validateOption(rawSignal, isQueueSignal, 'signal', 'queue signal must be an AbortSignal')
 		const normalized: QueueEntryOptions | undefined =
 			options === undefined
 				? undefined
@@ -212,10 +180,10 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 						...(timeout === undefined ? {} : { timeout }),
 						...(signal === undefined ? {} : { signal }),
 					})
-		if (this.#destroyed) {
+		if (this.#destroyPromise !== undefined) {
 			return Promise.reject(new QueueError('queue is destroyed', { code: 'destroyed' }))
 		}
-		if (this.#aborted) {
+		if (this.#abortPromise !== undefined) {
 			return Promise.reject(new QueueError('queue is aborted', { code: 'aborted' }))
 		}
 		if (this.#stopped) {
@@ -236,23 +204,26 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		return token.promise
 	}
 
-	/** Load and accept every outstanding stored entry from the current lifecycle generation. */
+	/**
+	 * Load and accept every outstanding stored entry from the current lifecycle generation.
+	 *
+	 * @returns A promise that settles after every loaded entry is reserved and accepted
+	 * @throws {QueueError} Thrown when the store's load fails or returns a malformed entry.
+	 */
 	async restore(): Promise<void> {
-		if (this.#store === undefined || this.stopped || this.#destroyed) return
+		if (this.#store === undefined || this.stopped || this.#destroyPromise !== undefined) return
 		const generation = this.#generation
 		const entries: Array<StoredEntry<TInput>> = []
 		let malformed = false
 		try {
 			const loaded = await this.#store.load()
 			for (const stored of loaded) {
-				const id: unknown = stored.id
-				const input = stored.input
-				const attempts: unknown = stored.attempts
-				if (!isString(id) || !isQueueRetries(attempts)) {
+				const candidate = { id: stored.id, input: stored.input, attempts: stored.attempts }
+				if (!isStoredEntry(candidate)) {
 					malformed = true
 					break
 				}
-				entries.push(Object.freeze({ id, input, attempts }))
+				entries.push(Object.freeze(candidate))
 			}
 		} catch (error: unknown) {
 			throw new QueueError('queue store load failed', {
@@ -267,9 +238,11 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 				context: { operation: 'load' },
 			})
 		}
-		if (generation !== this.#generation || this.stopped || this.#destroyed) return
+		if (generation !== this.#generation || this.stopped || this.#destroyPromise !== undefined)
+			return
 		for (const stored of entries) {
-			if (generation !== this.#generation || this.stopped || this.#destroyed) return
+			if (generation !== this.#generation || this.stopped || this.#destroyPromise !== undefined)
+				return
 			if (this.#live.has(stored.id)) continue
 			const token = this.#reserve(stored.id, stored.input, undefined, stored.attempts)
 			this.#accept(token)
@@ -279,13 +252,17 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 
 	/** Begin or restart worker execution unless the queue is terminal. */
 	start(): void {
-		if (this.#aborted || this.#destroyed) return
+		if (this.#abortPromise !== undefined || this.#destroyPromise !== undefined) return
 		this.#stopped = false
 		this.#stopPromise = undefined
 		this.#spawn()
 	}
 
-	/** Reject non-active work and await current-loop and durable cleanup quiescence. */
+	/**
+	 * Reject non-active work and await current-loop and durable cleanup quiescence.
+	 *
+	 * @returns The stable stop barrier
+	 */
 	stop(): Promise<void> {
 		if (this.#destroyPromise !== undefined) return this.#destroyPromise
 		if (this.#abortPromise !== undefined) return this.#abortPromise
@@ -307,13 +284,13 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 
 	/** Suspend new execution while leaving active entries untouched. */
 	pause(): void {
-		if (this.#paused || this.stopped || this.#destroyed) return
+		if (this.#paused || this.stopped || this.#destroyPromise !== undefined) return
 		this.#paused = true
 	}
 
 	/** Continue execution after a pause. */
 	resume(): void {
-		if (!this.#paused || this.stopped || this.#destroyed) return
+		if (!this.#paused || this.stopped || this.#destroyPromise !== undefined) return
 		this.#paused = false
 		this.#wakeAll()
 	}
@@ -328,7 +305,6 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		if (this.#abortPromise !== undefined) return this.#abortPromise
 		const barrier = Promise.withResolvers<void>()
 		this.#abortPromise = barrier.promise
-		this.#aborted = true
 		this.#stopped = true
 		this.#generation += 1
 		const error = new QueueError(reason instanceof Error ? reason.message : 'queue is aborted', {
@@ -345,9 +321,13 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		return barrier.promise
 	}
 
-	/** Reject non-active work and await its durable cleanup. */
+	/**
+	 * Reject non-active work and await its durable cleanup.
+	 *
+	 * @returns A promise that settles after every affected removal completes
+	 */
 	clear(): Promise<void> {
-		if (this.#destroyed) {
+		if (this.#destroyPromise !== undefined) {
 			return Promise.reject(new QueueError('queue is destroyed', { code: 'destroyed' }))
 		}
 		const existing: Array<Promise<void>> = []
@@ -364,12 +344,15 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		)
 	}
 
-	/** Tear down once, destroying the emitter only after cleanup finishes. */
+	/**
+	 * Tear down once, destroying the emitter only after cleanup finishes.
+	 *
+	 * @returns The stable destroy barrier
+	 */
 	destroy(): Promise<void> {
 		if (this.#destroyPromise !== undefined) return this.#destroyPromise
 		const barrier = Promise.withResolvers<void>()
 		this.#destroyPromise = barrier.promise
-		this.#destroyed = true
 		const aborting = this.abort(new QueueError('queue is destroyed', { code: 'destroyed' }))
 		void this.#settleDestroy(barrier, aborting)
 		return barrier.promise
@@ -422,7 +405,12 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 			this.#emitDrain()
 			return
 		}
-		if (entry.settled || this.#aborted || this.#destroyed || this.#stopped) {
+		if (
+			entry.settled ||
+			this.#abortPromise !== undefined ||
+			this.#destroyPromise !== undefined ||
+			this.#stopped
+		) {
 			await this.#discard(token)
 			return
 		}
@@ -439,7 +427,8 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	}
 
 	#spawn(): void {
-		if (this.#stopped || this.#aborted || this.#destroyed) return
+		if (this.#stopped || this.#abortPromise !== undefined || this.#destroyPromise !== undefined)
+			return
 		const demand = Math.min(this.#concurrency, this.#claims.size + this.#pending.length)
 		while (this.#workers.size < demand) {
 			const generation = this.#generation
@@ -475,7 +464,12 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		generation: number,
 		resolve: (token: PromiseWithResolvers<TResult> | undefined) => void,
 	): void {
-		if (generation !== this.#generation || this.#stopped || this.#aborted || this.#destroyed) {
+		if (
+			generation !== this.#generation ||
+			this.#stopped ||
+			this.#abortPromise !== undefined ||
+			this.#destroyPromise !== undefined
+		) {
 			resolve(undefined)
 			return
 		}

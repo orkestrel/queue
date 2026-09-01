@@ -1,4 +1,6 @@
-import { isFiniteNumber, isInteger } from '@orkestrel/contract'
+import type { StoredEntry } from './types.js'
+import { isFiniteNumber, isInteger, isRecord, isString } from '@orkestrel/contract'
+import { MAX_TIMEOUT_MS } from '@orkestrel/timeout'
 
 /**
  * Determine whether a value is a valid queue concurrency.
@@ -45,7 +47,7 @@ export function isQueueRetries(value: unknown): value is number {
  * ```
  */
 export function isQueueTimeout(value: unknown): value is number {
-	return isFiniteNumber(value) && isInteger(value) && value >= 0 && value <= 2_147_483_647
+	return isFiniteNumber(value) && isInteger(value) && value >= 0 && value <= MAX_TIMEOUT_MS
 }
 
 /**
@@ -66,6 +68,33 @@ export function isQueueSignal(value: unknown): value is AbortSignal {
 		if (getter === undefined) return false
 		Reflect.apply(getter, value, [])
 		return true
+	} catch {
+		return false
+	}
+}
+
+/**
+ * Checks whether a value is a valid stored queue entry.
+ *
+ * @remarks
+ * The single test for what a {@link StoredEntry} is, shared by the queue's `restore`
+ * boundary and the memory store's `save` boundary. `input` carries the caller's own
+ * payload type, so only its presence is checked.
+ *
+ * @param value - Value to inspect
+ * @returns True if the value is a record holding a string `id`, an `input` member, and a
+ *   nonnegative safe-integer `attempts`; false otherwise
+ *
+ * @example
+ * ```ts
+ * isStoredEntry({ id: 'job-1', input: 'task', attempts: 0 }) // true
+ * isStoredEntry({ id: 'job-1', input: 'task', attempts: -1 }) // false
+ * ```
+ */
+export function isStoredEntry(value: unknown): value is StoredEntry<unknown> {
+	try {
+		if (!isRecord(value)) return false
+		return isString(value.id) && 'input' in value && isQueueRetries(value.attempts)
 	} catch {
 		return false
 	}

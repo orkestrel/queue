@@ -20,6 +20,16 @@ export type QueueCode =
 	| 'cleanup'
 
 /**
+ * The construction and per-entry option keys a queue validates.
+ *
+ * @example
+ * ```ts
+ * const option: QueueOption = 'concurrency'
+ * ```
+ */
+export type QueueOption = 'id' | 'concurrency' | 'retries' | 'timeout' | 'signal'
+
+/**
  * Structured context carried by a {@link QueueError}.
  *
  * @example
@@ -29,7 +39,7 @@ export type QueueCode =
  */
 export interface QueueErrorContext {
 	readonly id?: string
-	readonly option?: 'id' | 'concurrency' | 'retries' | 'timeout' | 'signal'
+	readonly option?: QueueOption
 	readonly operation?: 'save' | 'remove' | 'load' | 'clear'
 	readonly value?: unknown
 }
@@ -204,10 +214,15 @@ export interface QueueOptions<TInput, TResult> {
  * ```
  */
 export interface QueueInterface<TInput, TResult> {
+	/** The typed push observation surface carrying this queue's {@link QueueEventMap} moments. */
 	readonly emitter: EmitterInterface<QueueEventMap<TResult>>
+	/** The number of reserved live entries — admitting, pending, claimed, or awaiting cleanup. */
 	readonly count: number
+	/** The number of claimed entries in flight, never above the queue's concurrency. */
 	readonly active: number
+	/** True while `pause` has suspended dequeuing; false otherwise. */
 	readonly paused: boolean
+	/** True after `stop` or `abort` has halted the queue; false otherwise. */
 	readonly stopped: boolean
 	/** Reserve and submit one FIFO entry. */
 	enqueue(input: TInput, options?: QueueEntryOptions): Promise<TResult>

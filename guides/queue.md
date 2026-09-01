@@ -69,37 +69,62 @@ const status = await queue.enqueue('https://example.com')
 
 ### Types
 
-| Type                  | Kind      | Shape                                                                                                                              |
-| --------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `QueueExecution`      | interface | The per-attempt handle a handler receives — a stable `id` (idempotency key) + a `signal` (timeout / abort / entry signal).         |
-| `QueueHandler`        | type      | `(input, execution) => Promise<TResult> \| TResult` — runs one entry's work; may reject to retry.                                  |
-| `QueueEntryOptions`   | interface | Per-entry `enqueue` options — `id?` / `retries?` / `timeout?` / `signal?`.                                                         |
-| `QueueOptions`        | interface | `createQueue` options — `handler` + `concurrency?` / `retries?` / `timeout?` / `store?` / `on?` / `error?`.                        |
-| `QueueInterface`      | interface | `emitter` / `count` / `active` / `paused` / `stopped` data members + the lifecycle + `enqueue` / `restore` methods.                |
-| `QueueEventMap`       | type      | The `Queue`'s observable events — `enqueue` / `start` / `retry` / `success` / `failure` / `abort` / `drain`.                       |
-| `QueueCode`           | type      | Exact codes: `invalid` / `duplicate` / `stopped` / `aborted` / `destroyed` / `cleared` / `timeout` / `store` / `cleanup`.          |
-| `QueueErrorContext`   | interface | Optional structured `id` / `option` (`id` / `concurrency` / `retries` / `timeout` / `signal`) / `operation` / `value` diagnostics. |
-| `QueueErrorOptions`   | interface | A `QueueError`'s required `code` plus optional `context` and `cause`.                                                              |
-| `StoredEntry`         | interface | A durably persisted, outstanding entry — `id` / `input` / `attempts` (its `readonly` data members).                                |
-| `QueueStoreInterface` | interface | Durable backing for outstanding entries — `save` / `remove` / `load` / `clear` methods.                                            |
+| Type                  | Kind      | Shape                                                                                                                      |
+| --------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `QueueExecution`      | interface | The per-attempt handle a handler receives — a stable `id` (idempotency key) + a `signal` (timeout / abort / entry signal). |
+| `QueueHandler`        | type      | `(input, execution) => Promise<TResult> \| TResult` — runs one entry's work; may reject to retry.                          |
+| `QueueEntryOptions`   | interface | Per-entry `enqueue` options — `id?` / `retries?` / `timeout?` / `signal?`.                                                 |
+| `QueueOptions`        | interface | `createQueue` options — `handler` + `concurrency?` / `retries?` / `timeout?` / `store?` / `on?` / `error?`.                |
+| `QueueInterface`      | interface | `emitter` / `count` / `active` / `paused` / `stopped` data members + the lifecycle + `enqueue` / `restore` methods.        |
+| `QueueEventMap`       | type      | The `Queue`'s observable events — `enqueue` / `start` / `retry` / `success` / `failure` / `abort` / `drain`.               |
+| `QueueCode`           | type      | Exact codes: `invalid` / `duplicate` / `stopped` / `aborted` / `destroyed` / `cleared` / `timeout` / `store` / `cleanup`.  |
+| `QueueOption`         | type      | The validated option keys: `id` / `concurrency` / `retries` / `timeout` / `signal`.                                        |
+| `QueueErrorContext`   | interface | Optional structured `id` / `option` (a `QueueOption`) / `operation` / `value` diagnostics.                                 |
+| `QueueErrorOptions`   | interface | A `QueueError`'s required `code` plus optional `context` and `cause`.                                                      |
+| `StoredEntry`         | interface | A durably persisted, outstanding entry — `id` / `input` / `attempts` (its `readonly` data members).                        |
+| `QueueStoreInterface` | interface | Durable backing for outstanding entries — `save` / `remove` / `load` / `clear` methods.                                    |
 
 ### Guards
 
-| API                  | Kind     | Summary                                                           |
-| -------------------- | -------- | ----------------------------------------------------------------- |
-| `isQueueError`       | function | Total guard for safely narrowing an unknown caught queue failure. |
-| `isQueueConcurrency` | function | Total guard for a positive safe-integer concurrency value.        |
-| `isQueueRetries`     | function | Total guard for a nonnegative safe-integer retry count.           |
-| `isQueueTimeout`     | function | Total guard for integer milliseconds in the native timer range.   |
-| `isQueueSignal`      | function | Total native-brand guard for an entry abort signal.               |
+| API                  | Kind     | Summary                                                                                   |
+| -------------------- | -------- | ----------------------------------------------------------------------------------------- |
+| `isQueueError`       | function | Total guard for safely narrowing an unknown caught queue failure.                         |
+| `isQueueConcurrency` | function | Total guard for a positive safe-integer concurrency value.                                |
+| `isQueueRetries`     | function | Total guard for a nonnegative safe-integer retry count.                                   |
+| `isQueueTimeout`     | function | Total guard for integer milliseconds in the native timer range.                           |
+| `isQueueSignal`      | function | Total native-brand guard for an entry abort signal.                                       |
+| `isStoredEntry`      | function | Total guard for a stored entry — a string `id`, an `input`, and a retry-count `attempts`. |
 
 ```ts
-import { isQueueConcurrency, isQueueRetries, isQueueSignal, isQueueTimeout } from '@orkestrel/queue'
+import {
+	isQueueConcurrency,
+	isQueueRetries,
+	isQueueSignal,
+	isQueueTimeout,
+	isStoredEntry,
+} from '@orkestrel/queue'
 
 isQueueConcurrency(4) // true
 isQueueRetries(2) // true
 isQueueTimeout(Infinity) // false
 isQueueSignal(new AbortController().signal) // true
+isStoredEntry({ id: 'job-1', input: 'task', attempts: 0 }) // true
+```
+
+### Helpers
+
+The two option leaves the constructor and `enqueue` share, so one read boundary and one guard boundary serve both. `readOption` reads a named property of a caller-supplied `QueueEntryOptions` exactly once and turns a throwing getter into a coded `QueueError`; `validateOption` applies a guard to an already-read value and throws the coded invalid-value failure with the option and the refused value in its context.
+
+| API              | Kind     | Summary                                                                              |
+| ---------------- | -------- | ------------------------------------------------------------------------------------ |
+| `readOption`     | function | Read one named entry option once, containing a throwing getter as a coded failure.   |
+| `validateOption` | function | Check one already-read option against its guard, or throw the coded invalid failure. |
+
+```ts
+import { isQueueRetries, readOption, validateOption } from '@orkestrel/queue'
+
+const raw = readOption({ retries: 2 }, 'retries', 'queue retries could not be read') // 2
+const retries = validateOption(raw, isQueueRetries, 'retries', 'queue retries must be an integer') // 2
 ```
 
 The `emitter` / `count` / `active` / `paused` / `stopped` members of `QueueInterface` are `readonly` data members (Surface rows, above) — `emitter` is the typed push observation surface (see [Observing](#observing)); their call-signature methods are documented under [Methods](#methods).
@@ -301,6 +326,8 @@ await queue.destroy() // abort, clean up, then destroy the emitter last; idempot
 - [`tests/guides.test.ts`](../tests/guides.test.ts) — the `## Surface` ↔ `src/core` bijection (value + type exports) and the `QueueInterface` / `QueueStoreInterface` ↔ `Queue` / `MemoryQueueStore` / `DatabaseQueueStore` method bijection.
 - [`tests/src/core/Queue.test.ts`](../tests/src/core/Queue.test.ts) — the canonical queue suite: FIFO/concurrency/retries/native-range timeouts, hostile-safe rejection normalization, one-read constructor normalization with undefined-only defaults, runtime-null rejection, fail-fast property access, real emitter-hook capture, one-read enqueue normalization and signal branding, demand-driven workers, runtime contracts, duplicate and serialized admissions, atomic claims and restore validation, stable reentrant lifecycle barriers, stale-restore generations, exclusive cleanup ownership and orphan retry, claimed-orphan clear isolation, active cleanup propagation, terminal-listener drain ordering, lifecycle behavior, observation safety, and real-store durability.
 - [`tests/src/core/factories.test.ts`](../tests/src/core/factories.test.ts) — construction identity/wiring only: each factory returns its concrete `Queue`, `DatabaseQueueStore`, or `MemoryQueueStore` entity; behavior stays in the concrete suites.
+- [`tests/src/core/helpers.test.ts`](../tests/src/core/helpers.test.ts) — the shared option leaves: one-read property access, throwing-getter containment with the cause preserved, guard narrowing, and the coded invalid failure's option and refused value.
+- [`tests/src/core/validators.test.ts`](../tests/src/core/validators.test.ts) — `isStoredEntry` over well-formed, malformed, non-record, hostile-accessor, and cyclic values.
 - [`tests/src/core/stores/MemoryQueueStore.test.ts`](../tests/src/core/stores/MemoryQueueStore.test.ts) — the real shape-validated memory store: immutable JSON snapshots, caller/load alias isolation, one-read field capture, hostile-access containment, upsert/remove/load/clear semantics, and scale.
 - [`tests/src/core/stores/DatabaseQueueStore.test.ts`](../tests/src/core/stores/DatabaseQueueStore.test.ts) — over a memory-backed driver store: a `save` → `load` round-trip (value + typed `input`, including nested-object payloads), `save` upserts by id (no duplicate), `remove` drops one (absent is a no-op), `load` returns all outstanding in key order, `clear` empties it, plus scale (200 entries), upsert churn on one id, and complex / edge-value inputs (nested arrays, booleans, nullables, optionals).
 

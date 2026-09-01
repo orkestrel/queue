@@ -1,8 +1,8 @@
 import type { ContractInterface, ContractShape, Infer } from '@orkestrel/contract'
 import type { QueueStoreInterface, StoredEntry } from '../types.js'
-import { cloneJSONValue, createContract, isString } from '@orkestrel/contract'
+import { cloneJSONValue, createContract } from '@orkestrel/contract'
 import { QueueError } from '../errors.js'
-import { isQueueRetries } from '../validators.js'
+import { isStoredEntry } from '../validators.js'
 
 /**
  * An in-memory store owning validated, immutable JSON snapshots of outstanding entries.
@@ -36,15 +36,14 @@ export class MemoryQueueStore<TInput extends ContractShape> implements QueueStor
 	/** Upsert a validated, owned snapshot under the entry's id. */
 	save(entry: StoredEntry<Infer<TInput>>): Promise<void> {
 		try {
-			const id: unknown = entry.id
-			const input = entry.input
-			const attempts: unknown = entry.attempts
-			if (!isString(id) || !isQueueRetries(attempts)) {
+			const candidate = { id: entry.id, input: entry.input, attempts: entry.attempts }
+			if (!isStoredEntry(candidate)) {
 				throw new QueueError('queue store entry is invalid', {
 					code: 'store',
 					context: { operation: 'save' },
 				})
 			}
+			const { id, input, attempts } = candidate
 			this.#entries.set(id, this.#snapshot(id, input, attempts, 'save'))
 			return Promise.resolve()
 		} catch (error: unknown) {

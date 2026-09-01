@@ -1,6 +1,7 @@
 export * from './types.js'
 export * from './errors.js'
 export * from './validators.js'
+export * from './helpers.js'
 export * from './Queue.js'
 export * from './stores/DatabaseQueueStore.js'
 export * from './stores/MemoryQueueStore.js'
