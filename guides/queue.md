@@ -113,7 +113,7 @@ isStoredEntry({ id: 'job-1', input: 'task', attempts: 0 }) // true
 
 ### Helpers
 
-The two option leaves the constructor and `enqueue` share, so one read boundary and one guard boundary serve both. `readOption` reads a named property of a caller-supplied `QueueEntryOptions` exactly once and turns a throwing getter into a coded `QueueError`; `validateOption` applies a guard to an already-read value and throws the coded invalid-value failure with the option and the refused value in its context.
+Two option leaves back the queue's option handling. `readOption` reads one named property of a caller-supplied `QueueEntryOptions` exactly once and turns a throwing getter into a coded `QueueError`; `enqueue` uses it because entry options are foreign. `validateOption` applies a guard to an already-read value and throws the coded invalid-value failure with the option and the refused value in its context; both `enqueue` and the constructor use it.
 
 | API              | Kind     | Summary                                                                              |
 | ---------------- | -------- | ------------------------------------------------------------------------------------ |
