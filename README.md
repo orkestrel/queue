@@ -47,7 +47,7 @@ const status = await queue.enqueue('https://example.com')
 For the full surface — the `Queue` engine, options, the durable
 `QueueStoreInterface` (`MemoryQueueStore` / `DatabaseQueueStore`), the
 observable `emitter`, and usage patterns — see
-[`guides/src/queue.md`](guides/src/queue.md).
+[`guides/queue.md`](guides/queue.md).
 
 ## Package
 
