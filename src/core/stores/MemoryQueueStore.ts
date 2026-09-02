@@ -5,7 +5,7 @@ import { QueueError } from '../errors.js'
 import { isStoredEntry } from '../validators.js'
 
 /**
- * An in-memory store owning validated, immutable JSON snapshots of outstanding entries.
+ * Represents an in-memory store owning validated, immutable JSON snapshots of outstanding entries.
  *
  * @typeParam TInput - The contract shape for each stored input
  *
@@ -25,7 +25,7 @@ export class MemoryQueueStore<TInput extends ContractShape> implements QueueStor
 	readonly #entries = new Map<string, StoredEntry<Infer<TInput>>>()
 
 	/**
-	 * Create an in-memory queue store.
+	 * Creates an in-memory queue store.
 	 *
 	 * @param input - Runtime contract for each stored input
 	 */
@@ -33,7 +33,7 @@ export class MemoryQueueStore<TInput extends ContractShape> implements QueueStor
 		this.#contract = createContract(input)
 	}
 
-	/** Upsert a validated, owned snapshot under the entry's id. */
+	/** Upserts a validated, owned snapshot under the entry's id. */
 	save(entry: StoredEntry<Infer<TInput>>): Promise<void> {
 		try {
 			const candidate = { id: entry.id, input: entry.input, attempts: entry.attempts }
@@ -57,13 +57,13 @@ export class MemoryQueueStore<TInput extends ContractShape> implements QueueStor
 		}
 	}
 
-	/** Remove an entry; an absent id is a no-op. */
+	/** Removes an entry; an absent id is a no-op. */
 	remove(id: string): Promise<void> {
 		this.#entries.delete(id)
 		return Promise.resolve()
 	}
 
-	/** Return fresh immutable snapshots of every outstanding entry. */
+	/** Returns fresh immutable snapshots of every outstanding entry. */
 	load(): Promise<ReadonlyArray<StoredEntry<Infer<TInput>>>> {
 		try {
 			const snapshots: Array<StoredEntry<Infer<TInput>>> = []
@@ -85,7 +85,7 @@ export class MemoryQueueStore<TInput extends ContractShape> implements QueueStor
 		}
 	}
 
-	/** Remove every outstanding entry. */
+	/** Removes every outstanding entry. */
 	clear(): Promise<void> {
 		this.#entries.clear()
 		return Promise.resolve()

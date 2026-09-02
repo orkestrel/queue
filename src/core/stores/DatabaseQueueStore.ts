@@ -2,7 +2,7 @@ import type { TableInterface } from '@orkestrel/database'
 import type { QueueStoreInterface, StoredEntry } from '../types.js'
 
 /**
- * A {@link QueueStoreInterface} backed by one table of the `databases` layer — a
+ * Represents a {@link QueueStoreInterface} backed by one table of the `databases` layer — a
  * queue's durable state IS a table, so persistence reduces to keyed CRUD over a
  * `TableInterface`.
  *
@@ -34,7 +34,7 @@ export class DatabaseQueueStore<TInput> implements QueueStoreInterface<TInput> {
 	readonly #table: TableInterface<StoredEntry<TInput>>
 
 	/**
-	 * Wrap a table as a queue store.
+	 * Wraps a table as a queue store.
 	 *
 	 * @param table - The {@link TableInterface} holding the outstanding entries — its
 	 *   row is a {@link StoredEntry}`<TInput>` (the `{ id; input; attempts }` shape)
@@ -43,22 +43,22 @@ export class DatabaseQueueStore<TInput> implements QueueStoreInterface<TInput> {
 		this.#table = table
 	}
 
-	/** Upsert an entry by its `id` (a re-`save` of an existing `id` overwrites it). */
+	/** Upserts an entry by its `id` (a re-`save` of an existing `id` overwrites it). */
 	async save(entry: StoredEntry<TInput>): Promise<void> {
 		await this.#table.set(entry)
 	}
 
-	/** Drop a finished entry by `id`; absent is a no-op (no throw). */
+	/** Drops a finished entry by `id`; absent is a no-op (no throw). */
 	async remove(id: string): Promise<void> {
 		await this.#table.remove(id)
 	}
 
-	/** Every outstanding entry — the work to resume after a restart. */
+	/** Returns every outstanding entry — the work to resume after a restart. */
 	load(): Promise<ReadonlyArray<StoredEntry<TInput>>> {
 		return this.#table.records()
 	}
 
-	/** Empty the store — drop every outstanding entry. */
+	/** Empties the store — drops every outstanding entry. */
 	async clear(): Promise<void> {
 		await this.#table.clear()
 	}

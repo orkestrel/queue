@@ -8,7 +8,7 @@ import { DatabaseQueueStore } from './stores/DatabaseQueueStore.js'
 import { MemoryQueueStore } from './stores/MemoryQueueStore.js'
 
 /**
- * Create a concurrent, cooperative job queue — a bounded-concurrency engine that
+ * Creates a concurrent, cooperative job queue — a bounded-concurrency engine that
  * runs each enqueued input through a handler, with retries and a per-attempt
  * timeout / abort, all over the L1 `Abort` / `Timeout` primitives.
  *
@@ -48,7 +48,7 @@ export function createQueue<TInput, TResult>(
 }
 
 /**
- * Create a {@link DatabaseQueueStore} over any {@link DriverInterface} — the durable,
+ * Creates a {@link DatabaseQueueStore} over any {@link DriverInterface} — the durable,
  * driver-pluggable backing for a queue's outstanding entries.
  *
  * @remarks
@@ -106,7 +106,7 @@ export function createDatabaseQueueStore(
 }
 
 /**
- * Create an in-memory {@link MemoryQueueStore} — the zero-plumbing DEFAULT queue store
+ * Creates an in-memory {@link MemoryQueueStore} — the zero-plumbing DEFAULT queue store
  * over a plain `Map` (the twin of {@link DatabaseQueueStore}).
  *
  * @remarks

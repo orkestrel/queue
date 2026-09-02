@@ -26,7 +26,7 @@ import {
 } from './validators.js'
 
 /**
- * A concurrent, cooperative FIFO job queue with optional outstanding-work persistence.
+ * Represents a concurrent, cooperative FIFO job queue with optional outstanding-work persistence.
  *
  * @typeParam TInput - The work input each entry carries
  * @typeParam TResult - The value each entry resolves
@@ -73,7 +73,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	#drained = true
 
 	/**
-	 * Create a queue.
+	 * Creates a queue.
 	 *
 	 * @param options - Handler, validated execution limits, persistence, and observation hooks
 	 */
@@ -133,7 +133,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	}
 
 	/**
-	 * Reserve and submit one FIFO entry.
+	 * Reserves and submits one FIFO entry.
 	 *
 	 * @param input - Handler input
 	 * @param options - Optional id, retry/timeout overrides, and entry abort signal
@@ -205,7 +205,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	}
 
 	/**
-	 * Load and accept every outstanding stored entry from the current lifecycle generation.
+	 * Loads and accepts every outstanding stored entry from the current lifecycle generation.
 	 *
 	 * @returns A promise that settles after every loaded entry is reserved and accepted
 	 * @throws {QueueError} Thrown when the store's load fails or returns a malformed entry.
@@ -250,7 +250,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		}
 	}
 
-	/** Begin or restart worker execution unless the queue is terminal. */
+	/** Begins or restarts worker execution unless the queue is terminal. */
 	start(): void {
 		if (this.#abortPromise !== undefined || this.#destroyPromise !== undefined) return
 		this.#stopped = false
@@ -259,7 +259,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	}
 
 	/**
-	 * Reject non-active work and await current-loop and durable cleanup quiescence.
+	 * Rejects non-active work and awaits current-loop and durable cleanup quiescence.
 	 *
 	 * @returns The stable stop barrier
 	 */
@@ -282,13 +282,13 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		return barrier.promise
 	}
 
-	/** Suspend new execution while leaving active entries untouched. */
+	/** Suspends new execution while leaving active entries untouched. */
 	pause(): void {
 		if (this.#paused || this.stopped || this.#destroyPromise !== undefined) return
 		this.#paused = true
 	}
 
-	/** Continue execution after a pause. */
+	/** Continues execution after a pause. */
 	resume(): void {
 		if (!this.#paused || this.stopped || this.#destroyPromise !== undefined) return
 		this.#paused = false
@@ -296,7 +296,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	}
 
 	/**
-	 * Cancel the queue and await owned cleanup.
+	 * Cancels the queue and awaits owned cleanup.
 	 *
 	 * @param reason - Optional cause carried by the coded abort error
 	 * @returns The stable abort barrier
@@ -322,7 +322,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	}
 
 	/**
-	 * Reject non-active work and await its durable cleanup.
+	 * Rejects non-active work and awaits its durable cleanup.
 	 *
 	 * @returns A promise that settles after every affected removal completes
 	 */
@@ -345,7 +345,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	}
 
 	/**
-	 * Tear down once, destroying the emitter only after cleanup finishes.
+	 * Tears down once, destroying the emitter only after cleanup finishes.
 	 *
 	 * @returns The stable destroy barrier
 	 */

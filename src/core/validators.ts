@@ -3,10 +3,10 @@ import { isFiniteNumber, isInteger, isRecord, isString } from '@orkestrel/contra
 import { MAX_TIMEOUT_MS } from '@orkestrel/timeout'
 
 /**
- * Determine whether a value is a valid queue concurrency.
+ * Determines whether a value is a valid queue concurrency.
  *
  * @param value - Value to inspect
- * @returns Whether the value is a positive safe integer
+ * @returns True if the value is a positive safe integer; false otherwise
  *
  * @example
  * ```ts
@@ -19,10 +19,10 @@ export function isQueueConcurrency(value: unknown): value is number {
 }
 
 /**
- * Determine whether a value is a valid queue retry count.
+ * Determines whether a value is a valid queue retry count.
  *
  * @param value - Value to inspect
- * @returns Whether the value is a nonnegative safe integer
+ * @returns True if the value is a nonnegative safe integer; false otherwise
  *
  * @example
  * ```ts
@@ -35,10 +35,11 @@ export function isQueueRetries(value: unknown): value is number {
 }
 
 /**
- * Determine whether a value is a valid queue timeout.
+ * Determines whether a value is a valid queue timeout.
  *
  * @param value - Value to inspect
- * @returns Whether the value is an integer within the native timer range, inclusive
+ * @returns True if the value is an integer within the native timer range,
+ *   inclusive; false otherwise
  *
  * @example
  * ```ts
@@ -51,10 +52,10 @@ export function isQueueTimeout(value: unknown): value is number {
 }
 
 /**
- * Determine whether a value is a native abort signal usable by the queue.
+ * Determines whether a value is a native abort signal usable by the queue.
  *
  * @param value - Value to inspect
- * @returns Whether the value carries the native `AbortSignal` internal slot
+ * @returns True if the value carries the native `AbortSignal` internal slot; false otherwise
  *
  * @example
  * ```ts

@@ -1,7 +1,7 @@
 import type { EmitterErrorHandler, EmitterHooks, EmitterInterface } from '@orkestrel/emitter'
 
 /**
- * Machine-readable queue failure categories.
+ * Represents the machine-readable queue failure categories.
  *
  * @example
  * ```ts
@@ -20,7 +20,7 @@ export type QueueCode =
 	| 'cleanup'
 
 /**
- * The construction and per-entry option keys a queue validates.
+ * Represents the construction and per-entry option keys a queue validates.
  *
  * @example
  * ```ts
@@ -30,7 +30,7 @@ export type QueueCode =
 export type QueueOption = 'id' | 'concurrency' | 'retries' | 'timeout' | 'signal'
 
 /**
- * Structured context carried by a {@link QueueError}.
+ * Represents the structured context carried by a {@link QueueError}.
  *
  * @example
  * ```ts
@@ -45,7 +45,7 @@ export interface QueueErrorContext {
 }
 
 /**
- * Construction options for a {@link QueueError}.
+ * Represents the construction options for a {@link QueueError}.
  *
  * @example
  * ```ts
@@ -59,7 +59,7 @@ export interface QueueErrorOptions {
 }
 
 /**
- * The push observation surface of a {@link QueueInterface} (AGENTS §13) — the lifecycle
+ * Represents the push observation surface of a {@link QueueInterface} (AGENTS §13) — the lifecycle
  * moments a fire-and-forget observer (logging, metrics, tracing) subscribes to, ALONGSIDE
  * the per-entry `enqueue` promise.
  *
@@ -86,24 +86,24 @@ export interface QueueErrorOptions {
  * ```
  */
 export type QueueEventMap<TResult> = {
-	/** An entry was accepted (and durably persisted, when a store is set) — its id. */
+	/** Signals that an entry was accepted (and durably persisted, when a store is set) — its id. */
 	readonly enqueue: readonly [id: string]
-	/** An attempt began running — the entry's id (after it was dequeued, in flight). */
+	/** Signals that an attempt began running — the entry's id (after it was dequeued, in flight). */
 	readonly start: readonly [id: string]
-	/** A failed attempt is being retried — the entry id + completed-attempt count. */
+	/** Signals that a failed attempt is being retried — the entry id + completed-attempt count. */
 	readonly retry: readonly [id: string, attempt: number]
-	/** An entry settled successfully — its id + the resolved result. */
+	/** Signals that an entry settled successfully — its id + the resolved result. */
 	readonly success: readonly [id: string, result: TResult]
-	/** An entry settled with a terminal failure — its id + the error (always `unknown`). */
+	/** Signals that an entry settled with a terminal failure — its id + the error (always `unknown`). */
 	readonly failure: readonly [id: string, error: unknown]
-	/** The queue was aborted — its coded abort error. */
+	/** Signals that the queue was aborted — its coded abort error. */
 	readonly abort: readonly [reason: unknown]
-	/** The queue transitioned to no reserved live ids (drained). */
+	/** Signals that the queue transitioned to no reserved live ids (drained). */
 	readonly drain: readonly []
 }
 
 /**
- * The per-attempt execution handle a queue handler receives.
+ * Represents the per-attempt execution handle a queue handler receives.
  *
  * @example
  * ```ts
@@ -113,7 +113,7 @@ export type QueueEventMap<TResult> = {
  */
 export interface QueueExecution {
 	/**
-	 * The entry's stable id — equal across every attempt and across a crash-replay
+	 * Holds the entry's stable id — equal across every attempt and across a crash-replay
 	 * (`restore` re-runs an entry under its original id). Durable persistence is
 	 * at-least-once (a crash between handler-success and the store's `remove`, or a
 	 * failed `remove`, re-runs the entry), so use this id to make a handler idempotent
@@ -141,7 +141,7 @@ export type QueueHandler<TInput, TResult> = (
 ) => Promise<TResult> | TResult
 
 /**
- * Per-entry options for `enqueue`.
+ * Represents the per-entry options for `enqueue`.
  *
  * @remarks
  * - `id` — a trace label for the entry; defaults to a random UUID.
@@ -165,7 +165,7 @@ export interface QueueEntryOptions {
 }
 
 /**
- * Options for `createQueue`.
+ * Represents the options for `createQueue`.
  *
  * @remarks
  * - `handler` — runs each entry's work; rejecting triggers a retry while attempts
@@ -188,7 +188,7 @@ export interface QueueEntryOptions {
  */
 export interface QueueOptions<TInput, TResult> {
 	readonly on?: EmitterHooks<QueueEventMap<TResult>>
-	/** The emitter's listener-error handler (AGENTS §13) — a listener throw routes here, not to a domain event. */
+	/** Holds the emitter's listener-error handler (AGENTS §13) — a listener throw routes here, not to a domain event. */
 	readonly error?: EmitterErrorHandler
 	readonly handler: QueueHandler<TInput, TResult>
 	readonly concurrency?: number
@@ -198,7 +198,7 @@ export interface QueueOptions<TInput, TResult> {
 }
 
 /**
- * A concurrent, cooperative job queue.
+ * Represents a concurrent, cooperative job queue.
  *
  * @remarks
  * Exposes a typed {@link emitter} (AGENTS §13) carrying its lifecycle moments
@@ -214,38 +214,38 @@ export interface QueueOptions<TInput, TResult> {
  * ```
  */
 export interface QueueInterface<TInput, TResult> {
-	/** The typed push observation surface carrying this queue's {@link QueueEventMap} moments. */
+	/** Holds the typed push observation surface carrying this queue's {@link QueueEventMap} moments. */
 	readonly emitter: EmitterInterface<QueueEventMap<TResult>>
-	/** The number of reserved live entries — admitting, pending, claimed, or awaiting cleanup. */
+	/** Counts the reserved live entries — admitting, pending, claimed, or awaiting cleanup. */
 	readonly count: number
-	/** The number of claimed entries in flight, never above the queue's concurrency. */
+	/** Counts the claimed entries in flight, never above the queue's concurrency. */
 	readonly active: number
-	/** True while `pause` has suspended dequeuing; false otherwise. */
+	/** Reports the pause state: true while `pause` has suspended dequeuing; false otherwise. */
 	readonly paused: boolean
-	/** True after `stop` or `abort` has halted the queue; false otherwise. */
+	/** Reports the halt state: true after `stop` or `abort` has halted the queue; false otherwise. */
 	readonly stopped: boolean
-	/** Reserve and submit one FIFO entry. */
+	/** Reserves and submits one FIFO entry. */
 	enqueue(input: TInput, options?: QueueEntryOptions): Promise<TResult>
-	/** Re-enqueue outstanding entries loaded from the store; no-op without a store. */
+	/** Re-enqueues outstanding entries loaded from the store; no-op without a store. */
 	restore(): Promise<void>
-	/** Begin or restart worker execution. */
+	/** Begins or restarts worker execution. */
 	start(): void
-	/** Reject non-active work and await current-loop/durable quiescence. */
+	/** Rejects non-active work and awaits current-loop/durable quiescence. */
 	stop(): Promise<void>
-	/** Suspend new execution resumably. */
+	/** Suspends new execution resumably. */
 	pause(): void
-	/** Continue execution after a pause. */
+	/** Continues execution after a pause. */
 	resume(): void
-	/** Cancel active work, reject pending work, and await cleanup. */
+	/** Cancels active work, rejects pending work, and awaits cleanup. */
 	abort(reason?: unknown): Promise<void>
-	/** Reject non-active work and await its durable cleanup. */
+	/** Rejects non-active work and awaits its durable cleanup. */
 	clear(): Promise<void>
-	/** Tear down idempotently and destroy observation last. */
+	/** Tears down idempotently and destroys observation last. */
 	destroy(): Promise<void>
 }
 
 /**
- * A durably persisted, still-outstanding queue entry — re-run after a restart.
+ * Represents a durably persisted, still-outstanding queue entry — re-run after a restart.
  *
  * @remarks
  * The store holds only entries that have NOT yet completed, so what `load`
@@ -266,7 +266,7 @@ export interface StoredEntry<TInput> {
 }
 
 /**
- * Durable backing for a Queue's outstanding entries.
+ * Represents the durable backing for a Queue's outstanding entries.
  *
  * @remarks
  * The store holds ONLY work that has not yet completed: `save` upserts an entry

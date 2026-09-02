@@ -1,7 +1,7 @@
 import type { QueueErrorContext, QueueErrorOptions } from './types.js'
 
 /**
- * Error carrying a machine-readable queue category and optional context.
+ * Represents a failure carrying a machine-readable queue category and optional context.
  *
  * @example
  * ```ts
@@ -14,7 +14,7 @@ export class QueueError extends Error {
 	readonly context: QueueErrorContext | undefined
 
 	/**
-	 * Create a queue error.
+	 * Creates a queue error.
 	 *
 	 * @param message - Human-readable failure description
 	 * @param options - Machine-readable category, optional context, and optional cause
@@ -28,10 +28,11 @@ export class QueueError extends Error {
 }
 
 /**
- * Determine whether an unknown value is a {@link QueueError}.
+ * Determines whether an unknown value is a {@link QueueError}.
  *
  * @param value - The value to inspect
- * @returns `true` only for a `QueueError`; hostile values return `false`
+ * @returns True if the value is a real `QueueError` instance; false otherwise, including for
+ *   a hostile value
  *
  * @example
  * ```ts
