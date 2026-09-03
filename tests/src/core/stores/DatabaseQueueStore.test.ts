@@ -191,7 +191,7 @@ describe('DatabaseQueueStore — upsert churn on one id', () => {
 // PRODUCTION GAP: only a shallow nested object is covered. A real `input` payload may be
 // an array of objects, carry booleans / nullables / optionals / a record map, and nest
 // deeply. Each must survive the JSON-ish round-trip AND come back fully TYPED (every
-// property access below compiles with NO `as` — the contract narrows the read).
+// property access following compiles with NO `as` — the contract narrows the read).
 
 describe('DatabaseQueueStore — complex / edge-value inputs', () => {
 	it('round-trips a deeply nested payload of arrays, booleans, nullables and nested objects', async () => {

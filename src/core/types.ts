@@ -103,7 +103,7 @@ export type QueueEventMap<TResult> = {
 }
 
 /**
- * Represents the per-attempt execution handle a queue handler receives.
+ * Represents the per-attempt context a queue handler receives.
  *
  * @example
  * ```ts

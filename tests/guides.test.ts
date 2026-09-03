@@ -44,7 +44,7 @@ const MODULES = Object.freeze({ '@orkestrel/queue': 'src/core', '@src/core': 'sr
  *
  * A class that one-class-per-file evicted from its single consumer cannot become a
  * local, so it stays exported without being public. Naming it here is what makes that
- * intentional rather than forgotten — and the second assertion below fails when a name
+ * intentional rather than forgotten — and the internal-name assertion fails when a name
  * here stops being stranded, so the list cannot rot.
  */
 const INTERNAL: readonly string[] = Object.freeze([])

@@ -9,8 +9,7 @@ import { createStoredEntry } from '../../../setup.js'
 // mocks): every `StoredEntry` comes from the shared `createStoredEntry` builder in
 // `tests/setup.ts` and is a real, typed value carrying the genuine `{ id; input; attempts }`
 // shape (`.claude/rules/tests.md` § Test contract) — there is no codec to fake.
-// The cases cover the four-method
-// surface and its semantics: a `save` → `load` round-trip by value, `save` upserts by id
+// The cases cover the surface and its semantics: a `save` → `load` round-trip by value, `save` upserts by id
 // (never a duplicate), `remove` drops one (an absent id is a silent no-op), `load` returns
 // EVERY outstanding entry (the bulk-restore semantic — the whole table is the work to
 // resume), and `clear` empties it. Each primitive resolves a `Promise` (the async wrapper
