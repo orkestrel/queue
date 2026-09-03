@@ -2,7 +2,7 @@ import type { TableInterface } from '@orkestrel/database'
 import type { QueueStoreInterface, StoredEntry } from '../types.js'
 
 /**
- * Represents a {@link QueueStoreInterface} backed by one table of the `databases` layer — a
+ * Represents a {@link QueueStoreInterface} backed by one table of the `@orkestrel/database` layer — a
  * queue's durable state IS a table, so persistence reduces to keyed CRUD over a
  * `TableInterface`.
  *
@@ -12,7 +12,7 @@ import type { QueueStoreInterface, StoredEntry } from '../types.js'
  * `save` upserts an entry by its primary key (`set`), `remove` drops one (`remove`),
  * `load` returns every outstanding entry (`records` with no criteria), and `clear`
  * empties the table. Reads are narrowed through the table's contract, so `load`
- * returns typed {@link StoredEntry}`<TInput>[]` with no cast (AGENTS §1) — the table
+ * returns typed {@link StoredEntry}`<TInput>[]` with no cast — the table
  * is created over the `{ id; input; attempts }` column map, which `Infer`s to exactly
  * that row. The store holds only OUTSTANDING work (completed entries are `remove`d), so
  * `load` on startup yields precisely the entries to resume.

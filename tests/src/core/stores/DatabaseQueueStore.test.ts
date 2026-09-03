@@ -1,5 +1,3 @@
-import type { ContractShape, Infer } from '@orkestrel/contract'
-import type { QueueStoreInterface } from '@src/core'
 import { describe, expect, it } from 'vitest'
 import {
 	arrayShape,
@@ -11,26 +9,16 @@ import {
 	optionalShape,
 	stringShape,
 } from '@orkestrel/contract'
-import { createMemoryDriver } from '@orkestrel/database'
-import { createDatabaseQueueStore } from '@src/core'
 import { requireValue } from '@orkestrel/test'
+import { createDriverQueueStore } from '../../../setup.js'
 
-// A real DatabaseQueueStore over a fresh memory driver (no mocks) — the exact construction
-// `createMemoryQueueStore` USED to make before it became the plain-`Map` MemoryQueueStore
-// factory, so this mirror keeps exercising the driver-backed store (and its key-ordered
-// `load`). Typed by `Infer<TInput>` via the factory overload, so the typed-access assertions
-// below need no `as`.
-const memoryStore = <TInput extends ContractShape>(
-	input: TInput,
-): QueueStoreInterface<Infer<TInput>> => createDatabaseQueueStore(input, createMemoryDriver())
-
-// src/core/workers/stores/DatabaseQueueStore.ts — the durable, driver-backed queue store over
-// the databases layer. Exercised over a real memory-backed store (no mocks): a stored
-// entry round-trips by value AND by type, `save` upserts by id, `remove` drops one,
-// `load` returns every outstanding entry in key order, and `clear` empties it. The
-// typed `load()` boundary is proven by a compiling property access on the result
-// (AGENTS §1 — no `as` needed; the contract narrows the read). Beyond the per-feature
-// cases, production-grade sections cover: scale (200 entries — save/load/remove/clear,
+// src/core/stores/DatabaseQueueStore.ts — the durable, driver-backed queue store over the
+// `@orkestrel/database` layer. Exercised over a real memory-backed store (no mocks): a
+// stored entry round-trips by value AND by type, `save` upserts by id, `remove` drops one,
+// `load` returns every outstanding entry in key order, and `clear` empties it. The typed
+// `load()` boundary is proven by a compiling property access on the result (`AGENTS.md`
+// § Non-negotiable rules — no `as` needed; the contract narrows the read). Beyond the
+// per-feature cases, production-grade sections cover: scale (200 entries — save/load/remove/clear,
 // stable key order), upsert churn on one id (100 re-saves → exactly one row) and across
 // interleaved ids (no cross-contamination), and complex / edge-value inputs (deeply
 // nested arrays / booleans / nullables / optionals / nested objects, an absent optional,
@@ -38,7 +26,7 @@ const memoryStore = <TInput extends ContractShape>(
 
 describe('DatabaseQueueStore (over a memory driver)', () => {
 	it('round-trips a saved entry through load() — value and type', async () => {
-		const store = memoryStore(stringShape())
+		const store = createDriverQueueStore(stringShape())
 		await store.save({ id: 'job-1', input: 'https://example.com', attempts: 0 })
 
 		const outstanding = await store.load()
@@ -50,7 +38,7 @@ describe('DatabaseQueueStore (over a memory driver)', () => {
 	})
 
 	it('round-trips a NESTED-OBJECT input — proving the typed payload survives', async () => {
-		const store = memoryStore(
+		const store = createDriverQueueStore(
 			objectShape({
 				url: stringShape(),
 				headers: objectShape({ accept: stringShape(), retries: integerShape({ min: 0 }) }),
@@ -73,7 +61,7 @@ describe('DatabaseQueueStore (over a memory driver)', () => {
 	})
 
 	it('upserts by id — re-saving the same id overwrites, never duplicates', async () => {
-		const store = memoryStore(stringShape())
+		const store = createDriverQueueStore(stringShape())
 		await store.save({ id: 'job-1', input: 'first', attempts: 0 })
 		await store.save({ id: 'job-1', input: 'first', attempts: 2 })
 
@@ -83,7 +71,7 @@ describe('DatabaseQueueStore (over a memory driver)', () => {
 	})
 
 	it('removes one outstanding entry by id, leaving the rest', async () => {
-		const store = memoryStore(stringShape())
+		const store = createDriverQueueStore(stringShape())
 		await store.save({ id: 'a', input: 'a', attempts: 0 })
 		await store.save({ id: 'b', input: 'b', attempts: 0 })
 
@@ -94,7 +82,7 @@ describe('DatabaseQueueStore (over a memory driver)', () => {
 	})
 
 	it('remove of an absent id is a no-op (no throw)', async () => {
-		const store = memoryStore(stringShape())
+		const store = createDriverQueueStore(stringShape())
 		await store.save({ id: 'a', input: 'a', attempts: 0 })
 
 		await expect(store.remove('missing')).resolves.toBeUndefined()
@@ -102,7 +90,7 @@ describe('DatabaseQueueStore (over a memory driver)', () => {
 	})
 
 	it('load() returns every outstanding entry in a stable (key) order', async () => {
-		const store = memoryStore(stringShape())
+		const store = createDriverQueueStore(stringShape())
 		// Saved out of key order; the store reads back in key order (the driver contract).
 		await store.save({ id: 'j3', input: 'c', attempts: 0 })
 		await store.save({ id: 'j1', input: 'a', attempts: 0 })
@@ -113,7 +101,7 @@ describe('DatabaseQueueStore (over a memory driver)', () => {
 	})
 
 	it('clear() empties the store', async () => {
-		const store = memoryStore(stringShape())
+		const store = createDriverQueueStore(stringShape())
 		await store.save({ id: 'a', input: 'a', attempts: 0 })
 		await store.save({ id: 'b', input: 'b', attempts: 0 })
 
@@ -131,7 +119,7 @@ describe('DatabaseQueueStore (over a memory driver)', () => {
 
 describe('DatabaseQueueStore — at scale', () => {
 	it('round-trips 200 entries, loads them in stable key order, removes + clears at scale', async () => {
-		const store = memoryStore(integerShape({ min: 0 }))
+		const store = createDriverQueueStore(integerShape({ min: 0 }))
 		const total = 200
 		// Save 200 entries with shuffled-looking ids (zero-padded so string order is stable).
 		for (let index = 0; index < total; index += 1) {
@@ -170,7 +158,7 @@ describe('DatabaseQueueStore — at scale', () => {
 
 describe('DatabaseQueueStore — upsert churn on one id', () => {
 	it('keeps exactly one row after 100 re-saves of the same id (the last value wins)', async () => {
-		const store = memoryStore(stringShape())
+		const store = createDriverQueueStore(stringShape())
 		for (let attempt = 0; attempt < 100; attempt += 1) {
 			await store.save({ id: 'climbing', input: `payload-${attempt}`, attempts: attempt })
 		}
@@ -181,7 +169,7 @@ describe('DatabaseQueueStore — upsert churn on one id', () => {
 	})
 
 	it('interleaves upserts across several ids without cross-contaminating rows', async () => {
-		const store = memoryStore(integerShape({ min: 0 }))
+		const store = createDriverQueueStore(integerShape({ min: 0 }))
 		// Three ids, each re-saved several times with climbing attempts, interleaved.
 		for (let round = 0; round < 10; round += 1) {
 			await store.save({ id: 'a', input: round, attempts: round })
@@ -203,11 +191,11 @@ describe('DatabaseQueueStore — upsert churn on one id', () => {
 // PRODUCTION GAP: only a shallow nested object is covered. A real `input` payload may be
 // an array of objects, carry booleans / nullables / optionals / a record map, and nest
 // deeply. Each must survive the JSON-ish round-trip AND come back fully TYPED (every
-// property access below compiles with NO `as` — the contract narrows the read, AGENTS §1).
+// property access below compiles with NO `as` — the contract narrows the read).
 
 describe('DatabaseQueueStore — complex / edge-value inputs', () => {
 	it('round-trips a deeply nested payload of arrays, booleans, nullables and nested objects', async () => {
-		const store = memoryStore(
+		const store = createDriverQueueStore(
 			objectShape({
 				url: stringShape(),
 				active: booleanShape(),
@@ -250,7 +238,7 @@ describe('DatabaseQueueStore — complex / edge-value inputs', () => {
 	})
 
 	it('round-trips an optional field present in one entry and absent in another', async () => {
-		const store = memoryStore(
+		const store = createDriverQueueStore(
 			objectShape({ url: stringShape(), label: optionalShape(stringShape()) }),
 		)
 		await store.save({ id: 'with', input: { url: 'a', label: 'home' }, attempts: 0 })
@@ -266,7 +254,7 @@ describe('DatabaseQueueStore — complex / edge-value inputs', () => {
 	})
 
 	it('round-trips an array-of-objects input and an empty array', async () => {
-		const store = memoryStore(
+		const store = createDriverQueueStore(
 			objectShape({ items: arrayShape(objectShape({ sku: stringShape(), qty: integerShape() })) }),
 		)
 		await store.save({

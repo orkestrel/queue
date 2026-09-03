@@ -138,7 +138,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	 * @param input - Handler input
 	 * @param options - Optional id, retry/timeout overrides, and entry abort signal
 	 * @returns The entry's settle-once execution promise
-	 * @throws {QueueError} Synchronously when an option is inaccessible or invalid
+	 * @throws {QueueError} Thrown synchronously when an option is inaccessible or invalid.
 	 */
 	enqueue(input: TInput, options?: QueueEntryOptions): Promise<TResult> {
 		const rawId = readOption(options, 'id', 'queue entry id could not be read')

@@ -18,13 +18,14 @@ import { MemoryQueueStore } from './stores/MemoryQueueStore.js'
  * returns a promise that settles when the entry finally completes, fails (after its
  * retries), or is rejected by an abort. A queue-level `abort` never retries; the
  * lifecycle (`start` / `stop` / `pause` / `resume` / `abort` / `clear` / `destroy`)
- * follows AGENTS §10. The queue is observable (§13): a typed `emitter` surfaces
+ * follows the fixed lifecycle vocabulary. The queue is observable: a typed `emitter` surfaces
  * `enqueue` / `start` / `retry` / `success` / `failure` / `abort` / `drain`.
  *
  * @typeParam TInput - The work input each entry carries
  * @typeParam TResult - The value the handler resolves for an entry
- * @param options - The `handler` plus optional `concurrency` (default `1`),
- *   `retries` (default `0`), and a default per-attempt `timeout` in milliseconds
+ * @param options - The `handler` plus optional `concurrency`, `retries`, and a default
+ *   per-attempt `timeout` in milliseconds. Default: `concurrency` `1`, `retries` `0`,
+ *   `timeout` `0`.
  * @returns A working {@link QueueInterface}
  *
  * @example
@@ -84,7 +85,7 @@ export function createDatabaseQueueStore<TInput extends ContractShape>(
 	input: TInput,
 	driver: DriverInterface,
 ): QueueStoreInterface<Infer<TInput>>
-// The public signature above types the store by `Infer<TInput>`. The implementation
+// The preceding public signature types the store by `Infer<TInput>`. The implementation
 // runs on the BROAD `ContractShape`, so the `entries` row is built and the table read
 // once — not re-instantiated per concrete `TInput`. (A generic `TInput` member can't be
 // reduced by the contract's object inference, which would also trip TS's

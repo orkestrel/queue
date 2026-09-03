@@ -1,6 +1,7 @@
 // The consumer-side guides-parity drop-in: runs `@orkestrel/guide`'s checks against
-// this repo's own `guides/README.md` manifest. The four constants below are this
-// package's own, and are the only part a sibling package changes.
+// this repo's own `guides/README.md` manifest. The `FENCE_LANGUAGES`, `EXAMPLE_LANGUAGE`,
+// `MODULES`, `INTERNAL`, and `ROOT_FILES` constants are this package's own, and are the only
+// part a sibling package changes.
 
 import { describe, expect, it } from 'vitest'
 import {
@@ -18,6 +19,17 @@ import {
 	resolveLink,
 } from '@orkestrel/guide'
 import { readFileSync } from 'node:fs'
+import { stringShape } from '@orkestrel/contract'
+import {
+	createMemoryQueueStore,
+	isQueueConcurrency,
+	isQueueRetries,
+	isQueueSignal,
+	isQueueTimeout,
+	isStoredEntry,
+	readOption,
+	validateOption,
+} from '@src/core'
 import { requireValue } from '@orkestrel/test'
 import { readInventory } from '@orkestrel/test/server'
 
@@ -168,3 +180,46 @@ for (const entry of manifest) {
 		})
 	})
 }
+
+// Name resolution is not a behavioural proof: a fence documenting a value the code
+// contradicts passes every preceding parity assertion. These cases transcribe each
+// value-claiming fence of `guides/queue.md` and assert the value its `//` comment claims,
+// so a guard that starts returning the opposite reddens here. Change a fence, change the
+// transcription beside it.
+describe('guide fences', () => {
+	it('the guards fence returns the values it claims', () => {
+		expect(isQueueConcurrency(4)).toBe(true)
+		expect(isQueueRetries(2)).toBe(true)
+		expect(isQueueTimeout(Infinity)).toBe(false)
+		expect(isQueueSignal(new AbortController().signal)).toBe(true)
+		expect(isStoredEntry({ id: 'job-1', input: 'task', attempts: 0 })).toBe(true)
+	})
+
+	it('the helpers fence returns the values it claims', () => {
+		const raw = readOption({ retries: 2 }, 'retries', 'queue retries could not be read')
+		expect(raw).toBe(2)
+		const retries = validateOption(
+			raw,
+			isQueueRetries,
+			'retries',
+			'queue retries must be an integer',
+		)
+		expect(retries).toBe(2)
+	})
+
+	it('the persistence fence upserts by id, removes, and clears', async () => {
+		const store = createMemoryQueueStore(stringShape())
+		await store.save({ id: 'job-1', input: 'https://example.com', attempts: 0 })
+		await store.save({ id: 'job-1', input: 'https://example.com', attempts: 1 })
+
+		const outstanding = await store.load()
+		expect(outstanding).toHaveLength(1)
+		expect(outstanding[0]?.attempts).toBe(1)
+
+		await store.remove('job-1')
+		expect(await store.load()).toEqual([])
+
+		await store.clear()
+		expect(await store.load()).toEqual([])
+	})
+})

@@ -1,4 +1,5 @@
-import type { QueueEventMap, QueueExecution, QueueStoreInterface, StoredEntry } from '@src/core'
+import type { QueueContext, QueueEventMap, StoredEntry } from '@src/core'
+import type { QueueEvent } from '../../setup.js'
 import { describe, expect, it } from 'vitest'
 import { stringShape } from '@orkestrel/contract'
 import {
@@ -11,11 +12,13 @@ import {
 	Queue,
 } from '@src/core'
 import { createRecorder, createRecorders, requireValue, waitForDelay } from '@orkestrel/test'
+import { createStubStore, QUEUE_EVENTS } from '../../setup.js'
 
 // src/core/Queue.ts — the cooperative concurrent job engine. Real behaviour,
 // no mocks: handlers are gated on manually-settled promises (Promise.withResolvers) so ordering /
 // concurrency / pause are deterministic, and a real short Timeout drives the timeout
-// test. A recorder counts handler invocations (AGENTS §16). Beyond the per-feature
+// test. A recorder counts handler invocations (`.claude/rules/tests.md` § Test contract).
+// Beyond the per-feature
 // cases, production-grade stress sections cover: high concurrency × many entries (120
 // through 8 workers — never over the cap, each runs once, full drain), handler return /
 // failure shapes (sync throw vs async reject vs plain value vs non-Error throw),
@@ -24,7 +27,8 @@ import { createRecorder, createRecorders, requireValue, waitForDelay } from '@or
 // under churn (cleanup failures stay observable without wedging worker respawn), enqueue rejection
 // messages for every halted state, restore at scale + racing a concurrent same-id
 // enqueue (no double-run), and the wake-park under saturation (no lost wake / stuck
-// entry) — all with real hand-written failing stores, never behaviour mocks.
+// entry) — all with real failing stores scripted through `createStubStore` in
+// `tests/setup.ts`, never behaviour mocks.
 
 describe('Queue — enqueue + FIFO (concurrency 1)', () => {
 	it('runs the handler and resolves the promise with its result', async () => {
@@ -130,10 +134,10 @@ describe('Queue — per-attempt timeout', () => {
 		const queue = new Queue<undefined, void>({
 			timeout: 10,
 			retries: 1,
-			handler: (_input, execution: QueueExecution) =>
+			handler: (_input, context: QueueContext) =>
 				new Promise<void>((resolve) => {
 					// Ignore the signal deliberately, but observe that it fires on the deadline.
-					execution.signal.addEventListener('abort', () => fired.handler(), { once: true })
+					context.signal.addEventListener('abort', () => fired.handler(), { once: true })
 					// Resolve well after the deadline — the queue must not wait for us.
 					setTimeout(resolve, 100)
 				}),
@@ -163,9 +167,9 @@ describe('Queue — abort', () => {
 		const queue = new Queue<string, void>({
 			concurrency: 1,
 			retries: 5,
-			handler: (_input, execution: QueueExecution) => {
+			handler: (_input, context: QueueContext) => {
 				attempts.handler()
-				execution.signal.addEventListener('abort', () => fired.handler(), { once: true })
+				context.signal.addEventListener('abort', () => fired.handler(), { once: true })
 				return gate.promise
 			},
 		})
@@ -307,30 +311,10 @@ describe('Queue — cooperative wake-park (no busy-loop)', () => {
 // climbs, `remove` when an entry settles (success / terminal failure) or is drained
 // by a lifecycle call. Tests use a real `createMemoryQueueStore` (no mocks); two
 // queues sharing ONE store instance simulate a restart — queue B `restore()`s the
-// rows queue A persisted. A real, deliberately-failing `QueueStoreInterface`
-// (not a mock — a genuine alternate implementation) proves the initial-save
-// propagates while per-attempt saves stay best-effort.
-
-// A real QueueStoreInterface whose `save` always rejects (after recording the call);
-// `load` / `remove` / `clear` succeed. Proves a failing persistence path's contract.
-function failingSaveStore(): {
-	readonly store: QueueStoreInterface<string>
-	readonly saves: ReadonlyArray<StoredEntry<string>>
-} {
-	const saves: Array<StoredEntry<string>> = []
-	const store: QueueStoreInterface<string> = {
-		async save(entry) {
-			saves.push(entry)
-			throw new Error('store offline')
-		},
-		async remove() {},
-		async load() {
-			return []
-		},
-		async clear() {},
-	}
-	return { store, saves }
-}
+// rows queue A persisted. A deliberately-failing `QueueStoreInterface` scripted
+// through `createStubStore` (not a mock — a genuine alternate implementation of the
+// real interface) proves the initial-save propagates while per-attempt saves stay
+// best-effort.
 
 describe('Queue — durability: persist on accept, remove on settle', () => {
 	it('saves an entry on enqueue and removes it once it completes', async () => {
@@ -552,7 +536,10 @@ describe('Queue — durability: lifecycle drains remove rows', () => {
 
 describe('Queue — durability: save failures', () => {
 	it('rejects the enqueue when the initial save fails (accepting work is durable)', async () => {
-		const { store, saves } = failingSaveStore()
+		// A store whose `save` always rejects; `load` / `remove` / `clear` succeed.
+		const { store, saves } = createStubStore<string>({
+			save: () => Promise.reject(new Error('store offline')),
+		})
 		const ran = createRecorder<[string]>()
 		const queue = new Queue<string, string>({
 			store,
@@ -573,21 +560,13 @@ describe('Queue — durability: save failures', () => {
 	it('keeps running when a per-attempt save fails (best-effort persistence)', async () => {
 		// A real store that succeeds the FIRST save (accept) then fails every later save
 		// (the climbing-attempt persistence), proving per-attempt saves are best-effort.
-		const saves: Array<StoredEntry<string>> = []
-		const removes: string[] = []
-		const store: QueueStoreInterface<string> = {
-			async save(entry) {
-				saves.push(entry)
-				if (saves.length > 1) throw new Error('save flaky')
+		const saves = createRecorder<[]>()
+		const { store, removes } = createStubStore<string>({
+			save: () => {
+				saves.handler()
+				return saves.count > 1 ? Promise.reject(new Error('save flaky')) : Promise.resolve()
 			},
-			async remove(id) {
-				removes.push(id)
-			},
-			async load() {
-				return []
-			},
-			async clear() {},
-		}
+		})
 		const attempts = createRecorder<[]>()
 		const queue = new Queue<string, string>({
 			store,
@@ -612,7 +591,7 @@ describe('Queue — durability: save failures', () => {
 //
 // An entry-scoped `signal` rejects ONLY that entry the moment it fires (the queue
 // keeps running) and — like a queue-level abort — never retries. Its in-flight
-// attempt's `execution.signal` fires too, and combined with a `timeout` the
+// attempt's `context.signal` fires too, and combined with a `timeout` the
 // attempt's signal is the 3-way `AbortSignal.any` of queue-abort + entry-signal +
 // deadline (whichever fires first wins). Real `AbortController`s, no mocks.
 
@@ -623,9 +602,9 @@ describe('Queue — per-entry signal abort', () => {
 		const attempts = createRecorder<[string]>()
 		const queue = new Queue<string, void>({
 			retries: 5, // a generous budget the abort must NOT consume
-			handler: (input, execution: QueueExecution) => {
+			handler: (input, context: QueueContext) => {
 				attempts.handler(input)
-				execution.signal.addEventListener('abort', () => fired.handler(), { once: true })
+				context.signal.addEventListener('abort', () => fired.handler(), { once: true })
 				// Only the signalled entry ('a') blocks on the gate; any later entry resolves at
 				// once, so the queue is observably still alive after the abort.
 				return input === 'a' ? gate.promise : Promise.resolve()
@@ -673,8 +652,8 @@ describe('Queue — per-entry signal abort', () => {
 			retries: 3,
 			// A non-cooperative handler: it ignores its signal and only settles on the gate,
 			// so the ONLY thing that ends the attempt early is the combined signal firing.
-			handler: (_input, execution: QueueExecution) => {
-				execution.signal.addEventListener('abort', () => fired.handler(), { once: true })
+			handler: (_input, context: QueueContext) => {
+				context.signal.addEventListener('abort', () => fired.handler(), { once: true })
 				return gate.promise
 			},
 		})
@@ -755,14 +734,7 @@ describe('Queue — restore racing abort/destroy', () => {
 		// A real store whose `load()` blocks on a gate, so we can abort the queue mid-load.
 		const loadGate = Promise.withResolvers<ReadonlyArray<StoredEntry<string>>>()
 		const seen = createRecorder<[string]>()
-		const store: QueueStoreInterface<string> = {
-			async save() {},
-			async remove() {},
-			load() {
-				return loadGate.promise
-			},
-			async clear() {},
-		}
+		const { store } = createStubStore<string>({ load: () => loadGate.promise })
 		const queue = new Queue<string, string>({
 			store,
 			handler: (input) => {
@@ -852,14 +824,14 @@ describe('Queue — start idempotency and stop/start resume', () => {
 	})
 })
 
-// ── id on QueueExecution (the idempotency key, FIX 2) ─────────────────────────
+// ── id on QueueContext (the idempotency key, FIX 2) ───────────────────────────
 
 describe('Queue — execution carries a stable id', () => {
 	it('hands the handler the entry id, equal to the enqueue id', async () => {
 		const ids = createRecorder<[string]>()
 		const queue = new Queue<string, string>({
-			handler: (input, execution: QueueExecution) => {
-				ids.handler(execution.id)
+			handler: (input, context: QueueContext) => {
+				ids.handler(context.id)
 				return input
 			},
 		})
@@ -871,8 +843,8 @@ describe('Queue — execution carries a stable id', () => {
 		const ids = createRecorder<[string]>()
 		const queue = new Queue<string, string>({
 			retries: 2,
-			handler: (input, execution: QueueExecution) => {
-				ids.handler(execution.id)
+			handler: (input, context: QueueContext) => {
+				ids.handler(context.id)
 				if (ids.count < 3) throw new Error('retry')
 				return input
 			},
@@ -888,8 +860,8 @@ describe('Queue — execution carries a stable id', () => {
 		const ids = createRecorder<[string]>()
 		const queue = new Queue<string, string>({
 			store,
-			handler: (input, execution: QueueExecution) => {
-				ids.handler(execution.id)
+			handler: (input, context: QueueContext) => {
+				ids.handler(context.id)
 				return input
 			},
 		})
@@ -1026,14 +998,14 @@ describe('Queue — per-entry timeout / retry overrides interact correctly', () 
 		const queue = new Queue<{ readonly hold: number }, string>({
 			concurrency: 2,
 			timeout: 1_000, // generous queue default
-			handler: (input, execution: QueueExecution) =>
+			handler: (input, context: QueueContext) =>
 				new Promise<string>((resolve, reject) => {
 					const timer = setTimeout(() => resolve('done'), input.hold)
-					execution.signal.addEventListener(
+					context.signal.addEventListener(
 						'abort',
 						() => {
 							clearTimeout(timer)
-							reject(execution.signal.reason)
+							reject(context.signal.reason)
 						},
 						{ once: true },
 					)
@@ -1139,17 +1111,12 @@ describe('Queue — store remove failures under churn', () => {
 		// A real store that accepts saves (so entries are accepted) but ALWAYS throws on
 		// remove — proving every durable cleanup failure is surfaced and reservations stay held.
 		const removes = createRecorder<[string]>()
-		const store: QueueStoreInterface<string> = {
-			async save() {},
-			async remove(id) {
+		const { store } = createStubStore<string>({
+			remove: (id) => {
 				removes.handler(id)
-				throw new Error('remove offline')
+				return Promise.reject(new Error('remove offline'))
 			},
-			async load() {
-				return []
-			},
-			async clear() {},
-		}
+		})
 		const ran = createRecorder<[string]>()
 		const queue = new Queue<string, string>({
 			store,
@@ -1183,17 +1150,12 @@ describe('Queue — store remove failures under churn', () => {
 	it('clears pending rows in-memory even when the store rejects the drain remove', async () => {
 		const removes = createRecorder<[string]>()
 		const gate = Promise.withResolvers<string>()
-		const store: QueueStoreInterface<string> = {
-			async save() {},
-			async remove(id) {
+		const { store } = createStubStore<string>({
+			remove: (id) => {
 				removes.handler(id)
-				throw new Error('remove offline')
+				return Promise.reject(new Error('remove offline'))
 			},
-			async load() {
-				return []
-			},
-			async clear() {},
-		}
+		})
 		const queue = new Queue<string, string>({
 			store,
 			concurrency: 1,
@@ -1245,16 +1207,12 @@ describe('Queue — enqueue onto a halted queue rejects with the right reason', 
 		// The destroyed/aborted/stopped guards sit BEFORE the persist path, so a halted
 		// store-backed queue rejects synchronously without touching the store.
 		const saves = createRecorder<[string]>()
-		const store: QueueStoreInterface<string> = {
-			async save(entry) {
+		const { store } = createStubStore<string>({
+			save: (entry) => {
 				saves.handler(entry.id)
+				return Promise.resolve()
 			},
-			async remove() {},
-			async load() {
-				return []
-			},
-			async clear() {},
-		}
+		})
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
 		await queue.destroy()
 		await expect(queue.enqueue('x')).rejects.toThrow('destroyed')
@@ -1304,8 +1262,8 @@ describe('Queue — restore at scale + racing a concurrent enqueue', () => {
 		const queue = new Queue<string, string>({
 			store,
 			concurrency: 2,
-			handler: (input, execution: QueueExecution) => {
-				seen.handler(execution.id, input)
+			handler: (input, context: QueueContext) => {
+				seen.handler(context.id, input)
 				return input === 'live' ? gate.promise : Promise.resolve(input)
 			},
 		})
@@ -1379,28 +1337,18 @@ describe('Queue — wake-park under saturation has no stuck entry', () => {
 	})
 })
 
-// ── Emitter — the PUSH observation surface (AGENTS §13) ──────────────────────
+// ── Emitter — the PUSH observation surface ───────────────────────────────────
 //
 // Alongside each `enqueue` promise, the Queue exposes a typed `emitter`
 // (`QueueEventMap<TResult>`) carrying its lifecycle moments for fire-and-forget
 // observers. Every event is emitted directly; the emitter isolates a listener throw (it can
-// never escape into the cooperative wake-park / settle-once loop, AGENTS §13), routing it to
+// never escape into the cooperative wake-park / settle-once loop,
+// `.claude/rules/patterns.md` § Stateful emitters), routing it to
 // the emitter's own `error` handler (the `error` option), and every emit sits AFTER its wake /
 // park / settle transition. These pin: each event fires at the right moment with the right
 // payload; `on?` wires initial listeners at construction; and the LOAD-BEARING emit-safety
 // guarantee — a throwing observer cannot corrupt the engine (the queue still drains,
 // `#active`/`count` stay balanced, no parked worker is stranded), yet the `error` handler fires.
-
-// The QueueEventMap event names recorded across the emitter tests — fed to
-// `createRecorders` from `@orkestrel/test` (the per-event wiring lives there; this file
-// keeps only the names its scenarios observe).
-const QUEUE_EVENTS = ['enqueue', 'start', 'retry', 'success', 'failure', 'abort', 'drain'] as const
-
-// The recorded-name union, derived from the list rather than from `keyof QueueEventMap`:
-// `createRecorders` takes its names as a type argument (nothing infers them from the
-// emitter), and a union wider than the list would type an unwired key as a recorder while
-// it reads `undefined`.
-type QueueEvent = (typeof QUEUE_EVENTS)[number]
 
 describe('Queue — emitter (push observation surface)', () => {
 	it('a single entry fires enqueue → start → success → drain with the right payloads', async () => {
@@ -1887,22 +1835,22 @@ describe('Queue serialized durable admission', () => {
 		const saves = createRecorder<[number]>()
 		const order = createRecorder<[number]>()
 		const entries = new Map<string, StoredEntry<number>>()
-		const store: QueueStoreInterface<number> = {
-			async save(entry) {
+		const { store } = createStubStore<number>({
+			save: async (entry) => {
 				saves.handler(entry.input)
 				if (entry.input === 1) await first.promise
 				entries.set(entry.id, entry)
 			},
-			async remove(id) {
+			remove: (id) => {
 				entries.delete(id)
+				return Promise.resolve()
 			},
-			async load() {
-				return [...entries.values()]
-			},
-			async clear() {
+			load: () => Promise.resolve([...entries.values()]),
+			clear: () => {
 				entries.clear()
+				return Promise.resolve()
 			},
-		}
+		})
 		const queue = new Queue<number, number>({
 			store,
 			handler: (input) => {
@@ -1922,17 +1870,12 @@ describe('Queue serialized durable admission', () => {
 
 	it('continues with the next admission after a save failure', async () => {
 		const saves = createRecorder<[string]>()
-		const store: QueueStoreInterface<string> = {
-			async save(entry) {
+		const { store } = createStubStore<string>({
+			save: (entry) => {
 				saves.handler(entry.input)
-				if (entry.input === 'bad') throw new Error('offline')
+				return entry.input === 'bad' ? Promise.reject(new Error('offline')) : Promise.resolve()
 			},
-			async remove() {},
-			async load() {
-				return []
-			},
-			async clear() {},
-		}
+		})
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
 		const bad = queue.enqueue('bad', { id: 'bad' })
 		const good = queue.enqueue('good', { id: 'good' })
@@ -1957,18 +1900,13 @@ describe('Queue coordinated lifecycle', () => {
 	it('rejects a stale admission stopped before its save completes', async () => {
 		const save = Promise.withResolvers<void>()
 		const removals = createRecorder<[string]>()
-		const store: QueueStoreInterface<string> = {
-			async save() {
-				await save.promise
-			},
-			async remove(id) {
+		const { store } = createStubStore<string>({
+			save: () => save.promise,
+			remove: (id) => {
 				removals.handler(id)
+				return Promise.resolve()
 			},
-			async load() {
-				return []
-			},
-			async clear() {},
-		}
+		})
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
 		const stale = queue.enqueue('old', { id: 'old' })
 		const stopping = queue.stop()
@@ -1996,16 +1934,7 @@ describe('Queue coordinated lifecycle', () => {
 
 	it('destroys the emitter last and returns the same idempotent promise', async () => {
 		const removal = Promise.withResolvers<void>()
-		const store: QueueStoreInterface<string> = {
-			async save() {},
-			async remove() {
-				await removal.promise
-			},
-			async load() {
-				return []
-			},
-			async clear() {},
-		}
+		const { store } = createStubStore<string>({ remove: () => removal.promise })
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
 		queue.pause()
 		const pending = queue.enqueue('held')
@@ -2074,16 +2003,12 @@ describe('Queue — public guards and runtime ids', () => {
 
 	it('throws a coded invalid-id error before touching a store', () => {
 		const saves = createRecorder<[]>()
-		const store: QueueStoreInterface<number> = {
-			async save() {
+		const { store } = createStubStore<number>({
+			save: () => {
 				saves.handler()
+				return Promise.resolve()
 			},
-			async remove() {},
-			async load() {
-				return []
-			},
-			async clear() {},
-		}
+		})
 		const queue = new Queue<number, number>({ store, handler: (input) => input })
 		expect(() => Reflect.apply(queue.enqueue, queue, [1, { id: null }])).toThrow(
 			expect.objectContaining({
@@ -2252,14 +2177,7 @@ describe('Queue — atomic claims and stale restore generations', () => {
 		const load = Promise.withResolvers<ReadonlyArray<StoredEntry<string>>>()
 		const handled = createRecorder<[string]>()
 		const enqueued = createRecorder<[string]>()
-		const store: QueueStoreInterface<string> = {
-			async save() {},
-			async remove() {},
-			async load() {
-				return load.promise
-			},
-			async clear() {},
-		}
+		const { store } = createStubStore<string>({ load: () => load.promise })
 		const queue = new Queue<string, string>({
 			store,
 			handler: (input) => {
@@ -2287,18 +2205,13 @@ describe('Queue — exclusive cleanup ownership and lifecycle visibility', () =>
 		const first = Promise.withResolvers<void>()
 		const removes = createRecorder<[string]>()
 		let fail = true
-		const store: QueueStoreInterface<string> = {
-			async save() {},
-			async remove(id) {
+		const { store } = createStubStore<string>({
+			remove: async (id) => {
 				removes.handler(id)
 				if (removes.count === 1) await first.promise
 				if (fail) throw new Error('first cleanup failed')
 			},
-			async load() {
-				return []
-			},
-			async clear() {},
-		}
+		})
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
 		queue.pause()
 		const old = queue.enqueue('old', { id: 'shared' })
@@ -2332,16 +2245,9 @@ describe('Queue — exclusive cleanup ownership and lifecycle visibility', () =>
 
 	it('propagates active cleanup failure through stop and the entry result', async () => {
 		const gate = Promise.withResolvers<string>()
-		const store: QueueStoreInterface<string> = {
-			async save() {},
-			async remove() {
-				throw new Error('remove failed during stop')
-			},
-			async load() {
-				return []
-			},
-			async clear() {},
-		}
+		const { store } = createStubStore<string>({
+			remove: () => Promise.reject(new Error('remove failed during stop')),
+		})
 		const queue = new Queue<string, string>({ store, handler: () => gate.promise })
 		const running = queue.enqueue('active')
 		await waitForDelay(0)
@@ -2357,16 +2263,9 @@ describe('Queue — exclusive cleanup ownership and lifecycle visibility', () =>
 
 	it('propagates active cleanup failure through abort and the entry result', async () => {
 		const gate = Promise.withResolvers<string>()
-		const store: QueueStoreInterface<string> = {
-			async save() {},
-			async remove() {
-				throw new Error('remove failed during abort')
-			},
-			async load() {
-				return []
-			},
-			async clear() {},
-		}
+		const { store } = createStubStore<string>({
+			remove: () => Promise.reject(new Error('remove failed during abort')),
+		})
 		const queue = new Queue<string, string>({ store, handler: () => gate.promise })
 		const running = queue.enqueue('active')
 		await waitForDelay(0)
@@ -2382,17 +2281,12 @@ describe('Queue — exclusive cleanup ownership and lifecycle visibility', () =>
 	it('respawns after a running cleanup rejection and stop retries the orphan', async () => {
 		const handled = createRecorder<[string]>()
 		const removes = createRecorder<[string]>()
-		const store: QueueStoreInterface<string> = {
-			async save() {},
-			async remove(id) {
+		const { store } = createStubStore<string>({
+			remove: async (id) => {
 				removes.handler(id)
 				if (id === 'first' && removes.count === 1) throw new Error('transient remove failure')
 			},
-			async load() {
-				return []
-			},
-			async clear() {},
-		}
+		})
 		const queue = new Queue<string, string>({
 			store,
 			handler: (input) => {
@@ -2417,18 +2311,13 @@ describe('Queue — active cleanup and handler failure isolation', () => {
 		const removal = Promise.withResolvers<void>()
 		const removes = createRecorder<[]>()
 		let fail = true
-		const store: QueueStoreInterface<string> = {
-			async save() {},
-			async remove() {
+		const { store } = createStubStore<string>({
+			remove: async () => {
 				removes.handler()
 				if (removes.count === 1) await removal.promise
 				if (fail) throw new Error('active removal failed')
 			},
-			async load() {
-				return []
-			},
-			async clear() {},
-		}
+		})
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
 		const running = queue.enqueue('active')
 		void running.catch(() => {})
@@ -2456,11 +2345,8 @@ describe('Queue — active cleanup and handler failure isolation', () => {
 		const started = Promise.withResolvers<void>()
 		const removes = createRecorder<[]>()
 		const boundary = createRecorder<[number]>()
-		const store: QueueStoreInterface<string> = {
-			save() {
-				return Promise.resolve()
-			},
-			remove() {
+		const { store } = createStubStore<string>({
+			remove: () => {
 				removes.handler()
 				if (removes.count === 1) {
 					started.resolve()
@@ -2468,13 +2354,7 @@ describe('Queue — active cleanup and handler failure isolation', () => {
 				}
 				return Promise.resolve()
 			},
-			load() {
-				return Promise.resolve([])
-			},
-			clear() {
-				return Promise.resolve()
-			},
-		}
+		})
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
 		const running = queue.enqueue('active')
 		const failure = running.catch((error: unknown) => error)
@@ -2536,14 +2416,7 @@ describe('Queue — atomic restore validation', () => {
 				return Reflect.get(target, property, receiver)
 			},
 		})
-		const store: QueueStoreInterface<string> = {
-			async save() {},
-			async remove() {},
-			async load() {
-				return loaded
-			},
-			async clear() {},
-		}
+		const { store } = createStubStore<string>({ load: () => Promise.resolve(loaded) })
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
 		await expect(queue.restore()).rejects.toSatisfy(
 			(error: unknown) =>
@@ -2568,14 +2441,9 @@ describe('Queue — atomic restore validation', () => {
 				},
 			},
 		)
-		const store: QueueStoreInterface<string> = {
-			async save() {},
-			async remove() {},
-			async load() {
-				return [{ id: 'valid', input: 'first', attempts: 0 }, hostile]
-			},
-			async clear() {},
-		}
+		const { store } = createStubStore<string>({
+			load: () => Promise.resolve([{ id: 'valid', input: 'first', attempts: 0 }, hostile]),
+		})
 		const ran = createRecorder<[]>()
 		const queue = new Queue<string, string>({
 			store,
@@ -2608,14 +2476,7 @@ describe('Queue — atomic restore validation', () => {
 				},
 			},
 		)
-		const store: QueueStoreInterface<string> = {
-			async save() {},
-			async remove() {},
-			async load() {
-				return [malformed]
-			},
-			async clear() {},
-		}
+		const { store } = createStubStore<string>({ load: () => Promise.resolve([malformed]) })
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
 		await expect(queue.restore()).rejects.toSatisfy(
 			(error: unknown) =>
@@ -2638,14 +2499,7 @@ describe('Queue — atomic restore validation', () => {
 				},
 			},
 		)
-		const store: QueueStoreInterface<string> = {
-			async save() {},
-			async remove() {},
-			async load() {
-				return [malformed]
-			},
-			async clear() {},
-		}
+		const { store } = createStubStore<string>({ load: () => Promise.resolve([malformed]) })
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
 		await expect(queue.restore()).rejects.toSatisfy(
 			(error: unknown) =>

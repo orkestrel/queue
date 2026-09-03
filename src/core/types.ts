@@ -59,7 +59,7 @@ export interface QueueErrorOptions {
 }
 
 /**
- * Represents the push observation surface of a {@link QueueInterface} (AGENTS §13) — the lifecycle
+ * Represents the push observation surface of a {@link QueueInterface} — the lifecycle
  * moments a fire-and-forget observer (logging, metrics, tracing) subscribes to, ALONGSIDE
  * the per-entry `enqueue` promise.
  *
@@ -67,15 +67,15 @@ export interface QueueErrorOptions {
  *   {@link QueueInterface}'s own `TResult` — so the map is `QueueEventMap<TResult>`.
  *
  * @remarks
- * Listener isolation is the emitter's (AGENTS §13): every event is emitted directly and a
+ * Listener isolation is the emitter's: every event is emitted directly and a
  * listener throw is routed to the emitter's OWN `error` handler (the `error` option), never
  * onto this domain map and never into the cooperative wake-park / settle-once engine — so a
  * buggy observer can never reorder, throw into, or corrupt the queue. Every emit sits AFTER
  * the relevant wake / park / settle transition, so observation is purely a side-channel: a
- * throwing observer cannot unbalance `active` or strand a parked worker. Subscribe via
+ * throwing observer cannot unbalance `active` or strand a parked worker. Subscribe through
  * `queue.emitter.on(...)`.
  *
- * Declared as a `type` alias (not `interface extends EventMap`, §4.5 — `EventMap` is a
+ * Declared as a `type` alias (not `interface extends EventMap` — `EventMap` is a
  * `type` kind): a type-literal satisfies the `EventMap` constraint
  * (`Record<string, readonly unknown[]>`) structurally, whereas an interface lacks the
  * required index signature.
@@ -111,7 +111,7 @@ export type QueueEventMap<TResult> = {
  * 	signal.aborted ? id : input
  * ```
  */
-export interface QueueExecution {
+export interface QueueContext {
 	/**
 	 * Holds the entry's stable id — equal across every attempt and across a crash-replay
 	 * (`restore` re-runs an entry under its original id). Durable persistence is
@@ -137,14 +137,14 @@ export interface QueueExecution {
  */
 export type QueueHandler<TInput, TResult> = (
 	input: TInput,
-	execution: QueueExecution,
+	context: QueueContext,
 ) => Promise<TResult> | TResult
 
 /**
  * Represents the per-entry options for `enqueue`.
  *
  * @remarks
- * - `id` — a trace label for the entry; defaults to a random UUID.
+ * - `id` — a trace label for the entry. Default: a random UUID.
  * - `retries` — extra attempts after the first on failure (or a per-attempt
  *   timeout); overrides the queue default. A queue-level abort never retries.
  * - `timeout` — the nonnegative integer per-attempt deadline in milliseconds, at most
@@ -170,16 +170,16 @@ export interface QueueEntryOptions {
  * @remarks
  * - `handler` — runs each entry's work; rejecting triggers a retry while attempts
  *   remain.
- * - `concurrency` — the maximum number of entries in flight at once; defaults to
- *   `1` and must be a positive safe integer.
- * - `retries` — the default extra attempts per entry on failure; defaults to `0`
- *   and must be a nonnegative safe integer.
- * - `timeout` — the default per-attempt deadline in integer milliseconds; defaults to zero
- *   and must be between zero and `2_147_483_647`, inclusive.
+ * - `concurrency` — the maximum number of entries in flight at once. Default: `1`.
+ *   Must be a positive safe integer.
+ * - `retries` — the default extra attempts per entry on failure. Default: `0`.
+ *   Must be a nonnegative safe integer.
+ * - `timeout` — the default per-attempt deadline in integer milliseconds. Default: `0`,
+ *   which disables the deadline. Must be between `0` and `2_147_483_647`, inclusive.
  * - `store` — durable backing; outstanding entries survive a restart; call
  *   `restore()` to re-run them.
- * - `on` — the reserved {@link EmitterHooks} key (§8): initial listeners for the queue's
- *   {@link QueueEventMap}, wired at construction (e.g. `{ drain: () => log('idle') }`).
+ * - `on` — the reserved {@link EmitterHooks} key: initial listeners for the queue's
+ *   {@link QueueEventMap}, wired at construction, for example `{ drain: () => log('idle') }`.
  *
  * @example
  * ```ts
@@ -188,7 +188,7 @@ export interface QueueEntryOptions {
  */
 export interface QueueOptions<TInput, TResult> {
 	readonly on?: EmitterHooks<QueueEventMap<TResult>>
-	/** Holds the emitter's listener-error handler (AGENTS §13) — a listener throw routes here, not to a domain event. */
+	/** Holds the emitter's listener-error handler — a listener throw routes here, not to a domain event. */
 	readonly error?: EmitterErrorHandler
 	readonly handler: QueueHandler<TInput, TResult>
 	readonly concurrency?: number
@@ -201,12 +201,12 @@ export interface QueueOptions<TInput, TResult> {
  * Represents a concurrent, cooperative job queue.
  *
  * @remarks
- * Exposes a typed {@link emitter} (AGENTS §13) carrying its lifecycle moments
+ * Exposes a typed {@link emitter} carrying its lifecycle moments
  * ({@link QueueEventMap}) for fire-and-forget observers, ALONGSIDE each `enqueue` promise.
  * Emitting is observation-only — every event fires AFTER the relevant wake / park / settle
  * transition, so a buggy observer can never reorder or corrupt the wake-park / settle-once
  * engine: the emitter isolates a listener throw and routes it to its `error` handler (the
- * `error` option), never the engine. Subscribe via `queue.emitter.on(...)`.
+ * `error` option), never the engine. Subscribe through `queue.emitter.on(...)`.
  *
  * @example
  * ```ts
@@ -272,8 +272,8 @@ export interface StoredEntry<TInput> {
  * The store holds ONLY work that has not yet completed: `save` upserts an entry
  * (by its `id`), `remove` drops a finished one, `load` returns everything
  * outstanding (to restore a queue after a restart), and `clear` empties it. It is
- * a minimal interface (AGENTS §21) over the `databases` layer — a queue's durable
- * state is just a table — so any `DriverInterface` backend (memory, JSON, SQLite)
+ * a minimal interface over the `@orkestrel/database` layer — a queue's durable
+ * state is a table — so any `DriverInterface` backend (memory, JSON, SQLite)
  * persists it without the store knowing which.
  *
  * @typeParam TInput - The work input each {@link StoredEntry} carries

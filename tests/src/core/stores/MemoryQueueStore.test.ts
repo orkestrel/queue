@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import type { StoredEntry } from '@src/core'
 import { numberShape, objectShape, stringShape } from '@orkestrel/contract'
 import { createMemoryQueueStore, isQueueError, MemoryQueueStore } from '@src/core'
+import { createStoredEntry } from '../../../setup.js'
 
 // src/core/stores/MemoryQueueStore.ts — the zero-plumbing DEFAULT queue store
-// over a plain `Map` (the twin of DatabaseQueueStore, which wraps a databases table for a
-// driver-pluggable durable backend). Exercised directly over the real class (no mocks):
-// every `StoredEntry` is a real, typed value built inline (the genuine `{ id; input;
-// attempts }` shape, §16) — there is no codec to fake. The cases cover the four-method
+// over a plain `Map` (the twin of DatabaseQueueStore, which wraps an `@orkestrel/database`
+// table for a driver-pluggable durable backend). Exercised directly over the real class (no
+// mocks): every `StoredEntry` comes from the shared `createStoredEntry` builder in
+// `tests/setup.ts` and is a real, typed value carrying the genuine `{ id; input; attempts }`
+// shape (`.claude/rules/tests.md` § Test contract) — there is no codec to fake.
+// The cases cover the four-method
 // surface and its semantics: a `save` → `load` round-trip by value, `save` upserts by id
 // (never a duplicate), `remove` drops one (an absent id is a silent no-op), `load` returns
 // EVERY outstanding entry (the bulk-restore semantic — the whole table is the work to
@@ -17,18 +19,10 @@ import { createMemoryQueueStore, isQueueError, MemoryQueueStore } from '@src/cor
 // entries), upsert churn on one id, interleaved-id isolation, and immutable owned
 // structured-input snapshots.
 
-// A real StoredEntry builder with the genuine shape + overrides (a data stub, never a mock,
-// §16) — keeps each case's intent (the field under test) in the foreground.
-const entryOf = <TInput>(id: string, input: TInput, attempts = 0): StoredEntry<TInput> => ({
-	id,
-	input,
-	attempts,
-})
-
 describe('MemoryQueueStore (a plain-Map queue store)', () => {
 	it('round-trips a saved entry through load() — by value', async () => {
 		const store = new MemoryQueueStore(stringShape())
-		await store.save(entryOf('job-1', 'https://example.com'))
+		await store.save(createStoredEntry('job-1', 'https://example.com'))
 
 		const outstanding = await store.load()
 		expect(outstanding).toHaveLength(1)
@@ -37,7 +31,7 @@ describe('MemoryQueueStore (a plain-Map queue store)', () => {
 
 	it('load() returns a readonly snapshot array, not the backing store', async () => {
 		const store = new MemoryQueueStore(stringShape())
-		await store.save(entryOf('a', 'a'))
+		await store.save(createStoredEntry('a', 'a'))
 
 		const first = await store.load()
 		const second = await store.load()
@@ -48,8 +42,8 @@ describe('MemoryQueueStore (a plain-Map queue store)', () => {
 
 	it('upserts by id — re-saving the same id overwrites, never duplicates', async () => {
 		const store = new MemoryQueueStore(stringShape())
-		await store.save(entryOf('job-1', 'first', 0))
-		await store.save(entryOf('job-1', 'first', 2))
+		await store.save(createStoredEntry('job-1', 'first', 0))
+		await store.save(createStoredEntry('job-1', 'first', 2))
 
 		const outstanding = await store.load()
 		expect(outstanding).toHaveLength(1)
@@ -58,8 +52,8 @@ describe('MemoryQueueStore (a plain-Map queue store)', () => {
 
 	it('removes one outstanding entry by id, leaving the rest', async () => {
 		const store = new MemoryQueueStore(stringShape())
-		await store.save(entryOf('a', 'a'))
-		await store.save(entryOf('b', 'b'))
+		await store.save(createStoredEntry('a', 'a'))
+		await store.save(createStoredEntry('b', 'b'))
 
 		await store.remove('a')
 
@@ -69,7 +63,7 @@ describe('MemoryQueueStore (a plain-Map queue store)', () => {
 
 	it('remove of an absent id is a no-op (no throw)', async () => {
 		const store = new MemoryQueueStore(stringShape())
-		await store.save(entryOf('a', 'a'))
+		await store.save(createStoredEntry('a', 'a'))
 
 		await expect(store.remove('missing')).resolves.toBeUndefined()
 		expect(await store.load()).toHaveLength(1)
@@ -77,9 +71,9 @@ describe('MemoryQueueStore (a plain-Map queue store)', () => {
 
 	it('load() returns EVERY outstanding entry — the bulk-restore semantic', async () => {
 		const store = new MemoryQueueStore(stringShape())
-		await store.save(entryOf('j1', 'a'))
-		await store.save(entryOf('j2', 'b'))
-		await store.save(entryOf('j3', 'c'))
+		await store.save(createStoredEntry('j1', 'a'))
+		await store.save(createStoredEntry('j2', 'b'))
+		await store.save(createStoredEntry('j3', 'c'))
 
 		const outstanding = await store.load()
 		// The whole table is the work to resume — all three come back (insertion order).
@@ -89,8 +83,8 @@ describe('MemoryQueueStore (a plain-Map queue store)', () => {
 
 	it('clear() empties the store', async () => {
 		const store = new MemoryQueueStore(stringShape())
-		await store.save(entryOf('a', 'a'))
-		await store.save(entryOf('b', 'b'))
+		await store.save(createStoredEntry('a', 'a'))
+		await store.save(createStoredEntry('b', 'b'))
 
 		await store.clear()
 
@@ -109,7 +103,7 @@ describe('MemoryQueueStore — at scale', () => {
 		const store = new MemoryQueueStore(numberShape())
 		const total = 200
 		for (let index = 0; index < total; index += 1) {
-			await store.save(entryOf(`job-${String(index).padStart(4, '0')}`, index, index % 4))
+			await store.save(createStoredEntry(`job-${String(index).padStart(4, '0')}`, index, index % 4))
 		}
 
 		const loaded = await store.load()
@@ -141,7 +135,7 @@ describe('MemoryQueueStore — upsert churn on one id', () => {
 	it('keeps exactly one row after 100 re-saves of the same id (the last value wins)', async () => {
 		const store = new MemoryQueueStore(stringShape())
 		for (let attempt = 0; attempt < 100; attempt += 1) {
-			await store.save(entryOf('climbing', `payload-${attempt}`, attempt))
+			await store.save(createStoredEntry('climbing', `payload-${attempt}`, attempt))
 		}
 		const loaded = await store.load()
 		expect(loaded).toHaveLength(1)
@@ -151,9 +145,9 @@ describe('MemoryQueueStore — upsert churn on one id', () => {
 	it('interleaves upserts across several ids without cross-contaminating rows', async () => {
 		const store = new MemoryQueueStore(numberShape())
 		for (let round = 0; round < 10; round += 1) {
-			await store.save(entryOf('a', round, round))
-			await store.save(entryOf('b', round * 10, round))
-			await store.save(entryOf('c', round * 100, round))
+			await store.save(createStoredEntry('a', round, round))
+			await store.save(createStoredEntry('b', round * 10, round))
+			await store.save(createStoredEntry('c', round * 100, round))
 		}
 		const loaded = await store.load()
 		expect(loaded).toHaveLength(3)
@@ -180,7 +174,7 @@ describe('MemoryQueueStore — structured-object inputs', () => {
 			}),
 		)
 		const input = { url: 'https://example.com', headers: { accept: 'json', retries: 3 } }
-		await store.save(entryOf('job-nested', input, 1))
+		await store.save(createStoredEntry('job-nested', input, 1))
 
 		const [entry] = await store.load()
 		expect(entry?.input).toEqual(input)
