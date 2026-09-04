@@ -6,11 +6,11 @@
 > then race its `signal` against work to bound how long that work may run. The
 > time-bound half of the substrate's time-and-cancellation pair. Deliberately
 > thin: it is not a scheduler, not a debounce/throttle, not a retry policy —
-> just one `setTimeout` made re-armable, clearable, and parent-linkable. Its
-> native `AbortSignal` is the complete observation surface; there is no separate
-> event map. `start()` arms the deadline, `clear()` cancels it without firing,
-> and re-`start()`ing after an expiry swaps in a fresh signal, so a handle is
-> reusable across deadlines without re-construction. Source:
+> one `setTimeout` made re-armable, clearable, and parent-linkable. Its native
+> `AbortSignal` is the complete observation surface; there is no separate event
+> map. `start()` arms the deadline, `clear()` cancels it without firing, and
+> calling `start()` again after an expiry swaps in a fresh signal, so a handle
+> is reusable across deadlines without re-construction. Source:
 > [`src/core`](../src/core). Surfaced through the `@src/core` barrel.
 
 ## Surface
@@ -82,16 +82,16 @@ defaults to a random UUID.
 | `TimeoutInterface` | interface | `id` / `ms` / `signal` / `expired` data members + `start` / `clear` methods.                         |
 
 The `id`, `ms`, `signal`, and `expired` members are `readonly` data members of
-`TimeoutInterface` (Surface rows, above) — its call-signature methods are
-documented under [Methods](#methods). `expired` derives directly from the owned
-signal's `aborted` state rather than storing a duplicate lifecycle flag.
+`TimeoutInterface` (the preceding Surface rows) — its call-signature methods
+are documented under [Methods](#methods). `expired` derives directly from the
+owned signal's `aborted` state rather than storing a duplicate lifecycle flag.
 
 ## Methods
 
 The public methods of `TimeoutInterface` — every call-signature member listed
 (its `readonly` data members `id` / `ms` / `signal` / `expired` stay Surface
 rows). `Timeout` implements the interface exactly, so this doubles as the
-class's instance-method surface (AGENTS §22).
+class's instance-method surface (AGENTS.md, Documentation contract).
 
 #### `TimeoutInterface`
 
@@ -110,7 +110,7 @@ These invariants hold across `src/core` ↔ `timeout.md`:
 1. **DOC ↔ SOURCE bijection.** Every `function` / `class` / `const` /
    `interface` row in the `## Surface` tables is a real export of the timeout
    source, and every export appears as a Surface row — exhaustive, both
-   directions (AGENTS §22).
+   directions (AGENTS.md, Documentation contract).
 2. **Strict construction boundary.** `validateTimeoutOptions` requires a plain
    readable record, reads `id`, `ms`, and `signal` exactly once inside a
    contained boundary, validates them, and returns a fresh normalized copy that
@@ -152,7 +152,7 @@ async function fetchWithDeadline(url: string, ms: number): Promise<Response> {
 	try {
 		return await fetch(url, { signal: timeout.signal })
 	} finally {
-		timeout.clear() // no-op if the fetch already won the race
+		timeout.clear() // cancels the still-armed deadline when the fetch won the race
 	}
 }
 ```
@@ -198,8 +198,8 @@ timeout.start() // re-armed; a fresh deadline window begins
 ### Practices
 
 - **Race, don't poll** — attach a listener to `signal` (or pass it straight to
-  an API that accepts an `AbortSignal`, e.g. `fetch`) rather than polling
-  `expired`.
+  an API that accepts an `AbortSignal`, for example `fetch`) rather than
+  polling `expired`.
 - **`clear()` is always safe to call** — clearing an idle or already-cleared
   handle is a no-op; after expiry it installs a fresh non-aborted signal. Call
   it unconditionally in a `finally`.
@@ -226,8 +226,8 @@ timeout.start() // re-armed; a fresh deadline window begins
 
 ## See also
 
-- [`AGENTS.md`](../AGENTS.md) — the rules; §10 lifecycle (`start` / `clear`),
-  §8 options design, §22 documentation-as-contracts.
+- [`AGENTS.md`](../AGENTS.md) — the rules, including the documentation contract
+  and the fixed lifecycle meanings of `start` and `clear`.
 - [`contract.md`](contract.md) — the mirrored guide for `@orkestrel/contract`,
   the source of the validation primitives and `ContractError` used at the
   construction boundary.
