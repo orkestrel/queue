@@ -346,7 +346,7 @@ describe('Queue — durability: persist on accept, remove on settle', () => {
 		})
 
 		await expect(queue.enqueue('a')).rejects.toThrow('always fails')
-		// A terminal failure removes the row just like a success.
+		// A terminal failure removes the row like a success.
 		expect(await store.load()).toEqual([])
 	})
 
@@ -406,7 +406,7 @@ describe('Queue — durability: restore (restart simulation)', () => {
 		// Queue A: persist three entries but never run them — paused so its parked workers
 		// never dequeue, leaving the rows durably saved in the shared store. (We must NOT
 		// stop / drain A, since a lifecycle drain would remove the very rows
-		// B is meant to restore; a paused A simply holds them.)
+		// B is meant to restore; a paused A holds them.)
 		const a = new Queue<string, string>({ store, handler: (input) => input })
 		a.pause()
 		void a.enqueue('one').catch(() => {})
@@ -1089,7 +1089,7 @@ describe('Queue — rapid lifecycle churn keeps accounting balanced', () => {
 			concurrency: 4,
 			handler: (input) => input,
 		})
-		// Fire 50 enqueues, alternating success and rejection via a throwing branch.
+		// Fire 50 enqueues, alternating success and rejection through a throwing branch.
 		const promises = Array.from({ length: 50 }, (_unused, index) =>
 			queue.enqueue(index).catch(() => -1),
 		)
@@ -1470,7 +1470,7 @@ describe('Queue — emitter (push observation surface)', () => {
 		// `#active` / `count` stayed balanced (no stranded worker, no over/under-decrement).
 		expect(queue.active).toBe(0)
 		expect(queue.count).toBe(0)
-		// EVERY throw (not just the first) was routed to the emitter's error handler — (error, event).
+		// EVERY throw (not only the first) was routed to the emitter's error handler — (error, event).
 		expect(errors.count).toBe(20)
 		expect(errors.calls.every(([, event]) => event === 'success')).toBe(true)
 		// The queue still drains a fresh entry after the storm of throwing observers.

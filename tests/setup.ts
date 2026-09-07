@@ -14,7 +14,7 @@ import type { QueueStoreInterface, StoredEntry } from '@src/core'
 import { createMemoryDriver } from '@orkestrel/database'
 import { createDatabaseQueueStore } from '@src/core'
 
-/** The scripted primitives a stub store may override; each unsupplied one resolves a no-op. */
+/** Lists the scripted primitives a stub store may override; each unsupplied one resolves a no-op. */
 export interface StubStoreOptions<TInput> {
 	readonly save?: (entry: StoredEntry<TInput>) => Promise<void>
 	readonly remove?: (id: string) => Promise<void>
@@ -22,14 +22,14 @@ export interface StubStoreOptions<TInput> {
 	readonly clear?: () => Promise<void>
 }
 
-/** A scripted store paired with the live records of what the queue asked it to persist. */
+/** Pairs a scripted store with the live records of what the queue asked it to persist. */
 export interface StubStoreResult<TInput> {
 	readonly store: QueueStoreInterface<TInput>
 	readonly saves: ReadonlyArray<StoredEntry<TInput>>
 	readonly removes: readonly string[]
 }
 
-/** The `QueueEventMap` names the emitter suites record. */
+/** Lists the `QueueEventMap` names the emitter suites record. */
 export const QUEUE_EVENTS = Object.freeze([
 	'enqueue',
 	'start',
@@ -41,7 +41,7 @@ export const QUEUE_EVENTS = Object.freeze([
 ] as const)
 
 /**
- * The recorded-name union, derived from the list rather than from `keyof QueueEventMap`:
+ * Represents the recorded-name union, derived from the list rather than from `keyof QueueEventMap`:
  * `createRecorders` takes its names as a type argument (nothing infers them from the
  * emitter), and a union wider than the list would type an unwired key as a recorder while
  * it reads `undefined`.
