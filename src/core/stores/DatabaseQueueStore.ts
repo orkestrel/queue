@@ -2,9 +2,9 @@ import type { TableInterface } from '@orkestrel/database'
 import type { QueueStoreInterface, StoredEntry } from '../types.js'
 
 /**
- * Represents a {@link QueueStoreInterface} backed by one table of the `@orkestrel/database` layer — a
- * queue's durable state IS a table, so persistence reduces to keyed CRUD over a
- * `TableInterface`.
+ * Represents the opt-in durable store for a queue's outstanding entries, backed by one table
+ * of the `@orkestrel/database` layer — a queue's durable state is a table, so persistence
+ * reduces to keyed CRUD over a `TableInterface`.
  *
  * @remarks
  * The store is driver-agnostic: it holds a single {@link TableInterface} whose
@@ -14,7 +14,7 @@ import type { QueueStoreInterface, StoredEntry } from '../types.js'
  * empties the table. Reads are narrowed through the table's contract, so `load`
  * returns typed {@link StoredEntry}`<TInput>[]` with no cast — the table
  * is created over the `{ id; input; attempts }` column map, which `Infer`s to exactly
- * that row. The store holds only OUTSTANDING work (completed entries are `remove`d), so
+ * that row. The store holds only outstanding work (completed entries are `remove`d), so
  * `load` on startup yields precisely the entries to resume.
  *
  * @typeParam TInput - The work input each {@link StoredEntry} carries

@@ -13,7 +13,7 @@ import { MemoryQueueStore } from './stores/MemoryQueueStore.js'
  * timeout / abort, all over the L1 `Abort` / `Timeout` primitives.
  *
  * @remarks
- * Worker loops PARK on a wake list when no entry is ready and are woken one-at-a-time
+ * Worker loops park on a wake list when no entry is ready and are woken one-at-a-time
  * by `enqueue` / `resume`, so an idle queue consumes no CPU (no polling). `enqueue`
  * returns a promise that settles when the entry finally completes, fails (after its
  * retries), or is rejected by an abort. A queue-level `abort` never retries; the
@@ -28,18 +28,24 @@ import { MemoryQueueStore } from './stores/MemoryQueueStore.js'
  *   `timeout` `0`.
  * @returns A working {@link QueueInterface}
  *
- * @example
+ * @example Create a queue
  * ```ts
  * import { createQueue } from '@orkestrel/queue'
  *
- * const queue = createQueue<string, number>({
+ * // Ordered (concurrency defaults to 1): each entry runs to completion before the next.
+ * const queue = createQueue<Job, Output>({ handler: (job) => run(job) })
+ *
+ * const output = await queue.enqueue(job)
+ *
+ * // Bounded, retried, and time-boxed: four in flight, two extra attempts, 5s per attempt.
+ * const fetches = createQueue<string, number>({
  * 	handler: async (url, { signal }) => (await fetch(url, { signal })).status,
  * 	concurrency: 4,
  * 	retries: 2,
  * 	timeout: 5_000,
  * })
  *
- * const status = await queue.enqueue('https://example.com')
+ * const status = await fetches.enqueue('https://example.com')
  * ```
  */
 export function createQueue<TInput, TResult>(
@@ -50,7 +56,8 @@ export function createQueue<TInput, TResult>(
 
 /**
  * Creates a {@link DatabaseQueueStore} over any {@link DriverInterface} — the durable,
- * driver-pluggable backing for a queue's outstanding entries.
+ * driver-pluggable backing for a queue's outstanding entries, across a memory, JSON, or
+ * SQLite driver.
  *
  * @remarks
  * Builds a one-table database (`entries`, keyed by `id`) over the supplied driver, with
@@ -107,8 +114,9 @@ export function createDatabaseQueueStore(
 }
 
 /**
- * Creates an in-memory {@link MemoryQueueStore} — the zero-plumbing DEFAULT queue store
- * over a plain `Map` (the twin of {@link DatabaseQueueStore}).
+ * Creates an in-memory {@link MemoryQueueStore} over a plain `Map` — the zero-plumbing
+ * {@link QueueStoreInterface} a queue takes when its outstanding entries need not outlive
+ * the process, and the twin of {@link DatabaseQueueStore}.
  *
  * @remarks
  * The entries live in a process-lifetime `Map` and are gone when the process exits. The

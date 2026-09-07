@@ -3,11 +3,11 @@ import type { QueueEntryOptions, QueueOption } from './types.js'
 import { QueueError } from './errors.js'
 
 /**
- * Reads one named option from a caller-supplied entry options object.
+ * Reads one named option from a caller-supplied entry options object exactly once,
+ * containing a throwing getter as a coded failure.
  *
  * @remarks
- * The property is read exactly once, inside a boundary that contains a throwing
- * getter. An absent options object reads nothing and yields `undefined`.
+ * An absent options object reads nothing and yields `undefined`.
  *
  * @param options - The caller's own entry options, or `undefined`
  * @param option - The option key to read
@@ -38,7 +38,8 @@ export function readOption(
 }
 
 /**
- * Validates one already-read queue option against its guard.
+ * Validates one already-read queue option against its guard, and throws the coded invalid
+ * failure carrying the option and the refused value when the guard refuses it.
  *
  * @param value - The option value to check
  * @param guard - The total guard the value must satisfy

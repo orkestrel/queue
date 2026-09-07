@@ -5,7 +5,8 @@ import { QueueError } from '../errors.js'
 import { isStoredEntry } from '../validators.js'
 
 /**
- * Represents an in-memory store owning validated, immutable JSON snapshots of outstanding entries.
+ * Represents an in-memory store of a queue's outstanding entries — a process-lifetime `Map`
+ * owning validated, immutable JSON snapshots.
  *
  * @typeParam TInput - The contract shape for each stored input
  *

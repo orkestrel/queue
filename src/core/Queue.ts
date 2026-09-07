@@ -26,7 +26,8 @@ import {
 } from './validators.js'
 
 /**
- * Represents a concurrent, cooperative FIFO job queue with optional outstanding-work persistence.
+ * Represents a concurrent, cooperative FIFO job queue — a wake-park worker loop with
+ * retries, a per-attempt timeout, abort, and optional outstanding-work persistence.
  *
  * @typeParam TInput - The work input each entry carries
  * @typeParam TResult - The value each entry resolves

@@ -3,7 +3,7 @@ import { isFiniteNumber, isInteger, isRecord, isString } from '@orkestrel/contra
 import { MAX_TIMEOUT_MS } from '@orkestrel/timeout'
 
 /**
- * Determines whether a value is a valid queue concurrency.
+ * Determines whether a value is a valid queue concurrency — a positive safe integer.
  *
  * @param value - Value to inspect
  * @returns True if the value is a positive safe integer; false otherwise
@@ -19,7 +19,7 @@ export function isQueueConcurrency(value: unknown): value is number {
 }
 
 /**
- * Determines whether a value is a valid queue retry count.
+ * Determines whether a value is a valid queue retry count — a nonnegative safe integer.
  *
  * @param value - Value to inspect
  * @returns True if the value is a nonnegative safe integer; false otherwise
@@ -35,7 +35,8 @@ export function isQueueRetries(value: unknown): value is number {
 }
 
 /**
- * Determines whether a value is a valid queue timeout.
+ * Determines whether a value is a valid queue timeout — an integer count of milliseconds
+ * inside the native timer range.
  *
  * @param value - Value to inspect
  * @returns True if the value is an integer within the native timer range,
@@ -52,7 +53,8 @@ export function isQueueTimeout(value: unknown): value is number {
 }
 
 /**
- * Determines whether a value is a native abort signal usable by the queue.
+ * Determines whether a value is a native abort signal usable by the queue, testing the
+ * native brand rather than the shape.
  *
  * @param value - Value to inspect
  * @returns True if the value carries the native `AbortSignal` internal slot; false otherwise
@@ -75,7 +77,8 @@ export function isQueueSignal(value: unknown): value is AbortSignal {
 }
 
 /**
- * Checks whether a value is a valid stored queue entry.
+ * Determines whether a value is a valid stored queue entry — a record holding a string
+ * `id`, an `input`, and a nonnegative safe-integer `attempts`.
  *
  * @remarks
  * The single test for what a {@link StoredEntry} is, shared by the queue's `restore`

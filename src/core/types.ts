@@ -60,17 +60,17 @@ export interface QueueErrorOptions {
 
 /**
  * Represents the push observation surface of a {@link QueueInterface} — the lifecycle
- * moments a fire-and-forget observer (logging, metrics, tracing) subscribes to, ALONGSIDE
- * the per-entry `enqueue` promise.
+ * moments a fire-and-forget observer (logging, metrics, tracing) subscribes to, beside the
+ * per-entry `enqueue` promise.
  *
  * @typeParam TResult - The value an entry resolves (the `success` payload), mirroring the
  *   {@link QueueInterface}'s own `TResult` — so the map is `QueueEventMap<TResult>`.
  *
  * @remarks
  * Listener isolation is the emitter's: every event is emitted directly and a
- * listener throw is routed to the emitter's OWN `error` handler (the `error` option), never
+ * listener throw is routed to the emitter's own `error` handler (the `error` option), never
  * onto this domain map and never into the cooperative wake-park / settle-once engine — so a
- * buggy observer can never reorder, throw into, or corrupt the queue. Every emit sits AFTER
+ * buggy observer can never reorder, throw into, or corrupt the queue. Every emit sits after
  * the relevant wake / park / settle transition, so observation is purely a side-channel: a
  * throwing observer cannot unbalance `active` or strand a parked worker. Subscribe through
  * `queue.emitter.on(...)`.
@@ -125,7 +125,7 @@ export interface QueueContext {
 }
 
 /**
- * Runs one queued entry's work; may reject to trigger a retry.
+ * Runs one queued entry's work; a rejection triggers a retry while attempts remain.
  *
  * @typeParam TInput - The work input
  * @typeParam TResult - The resolved work result
@@ -198,12 +198,13 @@ export interface QueueOptions<TInput, TResult> {
 }
 
 /**
- * Represents a concurrent, cooperative job queue.
+ * Represents the contract a queue consumer holds — the readings of its live work, the
+ * typed observation surface, and the calls that submit, restore, and wind it down.
  *
  * @remarks
  * Exposes a typed {@link emitter} carrying its lifecycle moments
- * ({@link QueueEventMap}) for fire-and-forget observers, ALONGSIDE each `enqueue` promise.
- * Emitting is observation-only — every event fires AFTER the relevant wake / park / settle
+ * ({@link QueueEventMap}) for fire-and-forget observers, beside each `enqueue` promise.
+ * Emitting is observation-only — every event fires after the relevant wake / park / settle
  * transition, so a buggy observer can never reorder or corrupt the wake-park / settle-once
  * engine: the emitter isolates a listener throw and routes it to its `error` handler (the
  * `error` option), never the engine. Subscribe through `queue.emitter.on(...)`.
@@ -224,23 +225,23 @@ export interface QueueInterface<TInput, TResult> {
 	readonly paused: boolean
 	/** Reports the halt state: true after `stop` or `abort` has halted the queue; false otherwise. */
 	readonly stopped: boolean
-	/** Reserves and submits one FIFO entry. */
+	/** Reserves one FIFO entry, submits it, and wakes a worker; the returned promise settles when the entry finally settles. */
 	enqueue(input: TInput, options?: QueueEntryOptions): Promise<TResult>
-	/** Re-enqueues outstanding entries loaded from the store; no-op without a store. */
+	/** Re-enqueues the store's outstanding entries at their persisted attempt count so they run again; without a store it does nothing. */
 	restore(): Promise<void>
-	/** Begins or restarts worker execution. */
+	/** Begins or restarts worker execution after a `stop`, spawning loops for accepted demand up to the queue's concurrency; after an abort it does nothing. */
 	start(): void
-	/** Rejects non-active work and awaits current-loop/durable quiescence. */
+	/** Rejects non-active work and awaits durable removals plus current-loop quiescence, while in-flight entries settle normally. */
 	stop(): Promise<void>
-	/** Suspends new execution resumably. */
+	/** Suspends dequeuing until `resume`, parking the workers while in-flight entries keep running. */
 	pause(): void
-	/** Continues execution after a pause. */
+	/** Continues a paused queue, waking the parked workers. */
 	resume(): void
-	/** Cancels active work, rejects pending work, and awaits cleanup. */
+	/** Cancels active work through its signal, rejects pending work immediately, and awaits the owned persistence cleanup. */
 	abort(reason?: unknown): Promise<void>
-	/** Rejects non-active work and awaits its durable cleanup. */
+	/** Rejects non-active work immediately and awaits its durable removal, leaving active entries untouched. */
 	clear(): Promise<void>
-	/** Tears down idempotently and destroys observation last. */
+	/** Blocks admissions, aborts, awaits the cleanup, then destroys the emitter last; idempotent. */
 	destroy(): Promise<void>
 }
 
@@ -248,7 +249,7 @@ export interface QueueInterface<TInput, TResult> {
  * Represents a durably persisted, still-outstanding queue entry — re-run after a restart.
  *
  * @remarks
- * The store holds only entries that have NOT yet completed, so what `load`
+ * The store holds only entries that have not yet completed, so what `load`
  * returns on startup is exactly the work to resume. `id` keys the entry (the
  * store upserts by it); `input` is the handler's work payload (it must be
  * JSON-serializable to survive a JSON / SQLite driver); `attempts` is how many
@@ -266,10 +267,11 @@ export interface StoredEntry<TInput> {
 }
 
 /**
- * Represents the durable backing for a Queue's outstanding entries.
+ * Represents the durable backing for a queue's outstanding entries — the small keyed
+ * surface a restart resumes from.
  *
  * @remarks
- * The store holds ONLY work that has not yet completed: `save` upserts an entry
+ * The store holds only work that has not yet completed: `save` upserts an entry
  * (by its `id`), `remove` drops a finished one, `load` returns everything
  * outstanding (to restore a queue after a restart), and `clear` empties it. It is
  * a minimal interface over the `@orkestrel/database` layer — a queue's durable
@@ -284,8 +286,12 @@ export interface StoredEntry<TInput> {
  * ```
  */
 export interface QueueStoreInterface<TInput> {
+	/** Upserts one entry by its `id`, overwriting an entry already stored under that id. */
 	save(entry: StoredEntry<TInput>): Promise<void>
+	/** Drops one finished entry by `id`, doing nothing when the store holds no such id. */
 	remove(id: string): Promise<void>
+	/** Returns every outstanding entry — the work a restart resumes. */
 	load(): Promise<ReadonlyArray<StoredEntry<TInput>>>
+	/** Empties the store, dropping every outstanding entry. */
 	clear(): Promise<void>
 }

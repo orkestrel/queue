@@ -1,20 +1,14 @@
 # @orkestrel/queue
 
-A concurrent, cooperative typed **FIFO job queue**: `Queue` runs enqueued
-inputs through a handler under bounded concurrency, with retries and a
-per-attempt timeout / abort — each `enqueue` returns a promise that settles
-with the job's result. Idle worker loops **park** on a wake list instead of
-busy-polling, so an idle queue burns zero CPU; `enqueue` / `resume` wake
-exactly one (or all) parked loops. Cancellation is built on the L1 abort +
-timeout primitives, so an attempt that ignores its `signal` still fails when
-the per-attempt deadline runs out. Durability is opt-in and outstanding-only —
-pass a `store` and a `restore()` after a restart re-runs precisely the
-unfinished work; `DatabaseQueueStore` persists over any driver, and
-`MemoryQueueStore` is the zero-plumbing in-process default. The queue is
-observable (a typed `emitter` surfaces `enqueue` / `start` / `retry` /
-`success` / `failure` / `abort` / `drain`) and deliberately de-bloated — no
-scheduler, no priorities. Environment-agnostic — no I/O, no browser or server
-assumptions. Part of the `@orkestrel` line.
+> A concurrent, cooperative FIFO job queue: a bounded-concurrency engine that runs each
+> enqueued input through a handler with retries and a per-attempt timeout or abort, and
+> hands back one promise per `enqueue` that settles with that job's result.
+
+Create a queue with the `createQueue` function, hand it the handler that does the work, and
+await the promise each input hands back. Pass a `store` where the unfinished work must survive
+a restart, and subscribe to the `emitter` where a logger, a metric, or a trace needs the
+lifecycle moments. Environment-agnostic — no I/O, no browser or server assumptions. Part of
+the `@orkestrel` line.
 
 ## Install
 
