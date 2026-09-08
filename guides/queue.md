@@ -87,14 +87,18 @@ A `Shape` cell holds an interface's data members as bare names in braces, `?` ma
 
 ### Guards
 
-| API                  | Kind     | Summary                                                                                                                                           |
-| -------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `isQueueError`       | function | Determines whether an unknown value is a `QueueError`, staying total for a hostile value.                                                         |
-| `isQueueConcurrency` | function | Determines whether a value is a valid queue concurrency — a positive safe integer.                                                                |
-| `isQueueRetries`     | function | Determines whether a value is a valid queue retry count — a nonnegative safe integer.                                                             |
-| `isQueueTimeout`     | function | Determines whether a value is a valid queue timeout — an integer count of milliseconds inside the native timer range.                             |
-| `isQueueSignal`      | function | Determines whether a value is a native abort signal usable by the queue, testing the native brand rather than the shape.                          |
-| `isStoredEntry`      | function | Determines whether a value is a valid stored queue entry — a record holding a string `id`, an `input`, and a nonnegative safe-integer `attempts`. |
+In a guard table a `Shape` cell holds the type the guard narrows to.
+
+| API                  | Kind     | Shape                  | Summary                                                                                                                                           |
+| -------------------- | -------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `isQueueError`       | function | `QueueError`           | Determines whether an unknown value is a `QueueError`, staying total for a hostile value.                                                         |
+| `isQueueConcurrency` | function | `number`               | Determines whether a value is a valid queue concurrency — a positive safe integer.                                                                |
+| `isQueueRetries`     | function | `number`               | Determines whether a value is a valid queue retry count — a nonnegative safe integer.                                                             |
+| `isQueueTimeout`     | function | `number`               | Determines whether a value is a valid queue timeout — an integer count of milliseconds inside the native timer range.                             |
+| `isQueueSignal`      | function | `AbortSignal`          | Determines whether a value is a native abort signal usable by the queue, testing the native brand rather than the shape.                          |
+| `isStoredEntry`      | function | `StoredEntry<unknown>` | Determines whether a value is a valid stored queue entry — a record holding a string `id`, an `input`, and a nonnegative safe-integer `attempts`. |
+
+Call each guard on a sample value to see what it accepts and what it refuses:
 
 ```ts
 import {
@@ -121,6 +125,8 @@ isStoredEntry({ id: 'job-1', input: 'task', attempts: 0 }) // true
 | `readOption`     | function | Reads one named option from a caller-supplied entry options object exactly once, containing a throwing getter as a coded failure.                                    |
 | `validateOption` | function | Validates one already-read queue option against its guard, and throws the coded invalid failure carrying the option and the refused value when the guard refuses it. |
 
+Read one entry option, then validate what you read — the pair `enqueue` runs for every option a caller supplies:
+
 ```ts
 import { isQueueRetries, readOption, validateOption } from '@orkestrel/queue'
 
@@ -128,11 +134,11 @@ const raw = readOption({ retries: 2 }, 'retries', 'queue retries could not be re
 const retries = validateOption(raw, isQueueRetries, 'retries', 'queue retries must be an integer') // 2
 ```
 
-`QueueInterface`'s readonly data members stay here, in its `Shape` cell, rather than under [Methods](#methods), and `emitter` is the typed push observation surface described under [Observing](#observing).
+The `emitter`, `count`, `active`, `paused`, and `stopped` members of `QueueInterface` are `readonly` data members (Surface rows, earlier) — its call-signature methods are documented under [Methods](#methods).
 
 ## Methods
 
-The public methods of `QueueInterface` and `QueueStoreInterface` — every call-signature member listed (their `readonly` data members stay Surface rows). Each class (`Queue`, and both store classes `MemoryQueueStore` / `DatabaseQueueStore`) implements its interface exactly, so this doubles as each class's instance-method surface (`AGENTS.md` § Documentation contract).
+The public methods of `QueueInterface` and `QueueStoreInterface` — every call-signature member listed. Each class (`Queue`, and both store classes `MemoryQueueStore` / `DatabaseQueueStore`) implements its interface exactly, so this doubles as each class's instance-method surface (`AGENTS.md` § Documentation contract).
 
 #### `QueueInterface`
 
@@ -244,6 +250,8 @@ queue.emitter.on('failure', (id, error) => log.warn(`job ${id} failed`, error))
 
 ### Create a queue
 
+Build a queue over a handler and await each entry's result — the ordered default first, then a bounded, retried, time-boxed one:
+
 ```ts
 import { createQueue } from '@orkestrel/queue'
 
@@ -265,6 +273,8 @@ const status = await fetches.enqueue('https://example.com')
 
 ### Bounded concurrency
 
+Set `concurrency` to cap how many entries run at once; a later `enqueue` call waits for a slot to free up:
+
 ```ts
 // Up to 5 in flight at once; a sixth enqueue waits for a slot to free up.
 const pool = createQueue<string, Response>({
@@ -277,6 +287,8 @@ const responses = await Promise.all(urls.map((url) => pool.enqueue(url)))
 
 ### Retries
 
+Set `retries` for the queue default, and override it on the one entry that must not be re-run:
+
 ```ts
 // Three extra attempts; the handler is re-run on each rejection until one succeeds.
 const queue = createQueue<Job, Output>({ retries: 3, handler: (job) => flaky(job) })
@@ -286,6 +298,8 @@ await queue.enqueue(job, { retries: 0 }) // this one does not retry
 ```
 
 ### Per-attempt timeout
+
+Set `timeout` to bound each attempt; a deadline that fires counts as a failed attempt:
 
 ```ts
 const queue = createQueue<Job, Output>({
@@ -299,6 +313,8 @@ Observe `context.signal` in the handler to abandon work early; even if it ignore
 
 ### Abort
 
+Call `abort` to reject pending work and fire every in-flight handler's `signal`:
+
 ```ts
 const queue = createQueue<Job, Output>({ handler: (job, { signal }) => run(job, signal) })
 const pending = queue.enqueue(job)
@@ -310,6 +326,8 @@ await aborting // persistence cleanup is complete
 ```
 
 ### Lifecycle
+
+Call `pause`, `resume`, `clear`, `stop`, `start`, and `destroy` to suspend, drain, and wind down a running queue:
 
 ```ts
 queue.pause() // suspend dequeuing — workers park until resume

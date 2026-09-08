@@ -93,7 +93,7 @@ export function createDatabaseQueueStore<TInput extends ContractShape>(
 	driver: DriverInterface,
 ): QueueStoreInterface<Infer<TInput>>
 // The preceding public signature types the store by `Infer<TInput>`. The implementation
-// runs on the BROAD `ContractShape`, so the `entries` row is built and the table read
+// runs on the broad `ContractShape`, so the `entries` row is built and the table read
 // once — not re-instantiated per concrete `TInput`. (A generic `TInput` member can't be
 // reduced by the contract's object inference, which would also trip TS's
 // instantiation-depth guard; the broad body sidesteps both, and every call site still

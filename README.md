@@ -5,10 +5,10 @@
 > hands back one promise per `enqueue` that settles with that job's result.
 
 Create a queue with the `createQueue` function, hand it the handler that does the work, and
-await the promise each input hands back. Pass a `store` where the unfinished work must survive
-a restart, and subscribe to the `emitter` where a logger, a metric, or a trace needs the
-lifecycle moments. Environment-agnostic — no I/O, no browser or server assumptions. Part of
-the `@orkestrel` line.
+await each input's result. Pass a `store` where the unfinished work must survive a restart,
+and subscribe to the `emitter` where a logger, a metric, or a trace needs the lifecycle
+moments. Environment-agnostic — no I/O, no browser or server assumptions. Part of the
+`@orkestrel` line.
 
 ## Install
 

@@ -32,6 +32,10 @@ export type QueueOption = 'id' | 'concurrency' | 'retries' | 'timeout' | 'signal
 /**
  * Represents the structured context carried by a {@link QueueError}.
  *
+ * @remarks
+ * `option` names the {@link QueueOption} the failure concerns, and `operation` names the store
+ * call that failed.
+ *
  * @example
  * ```ts
  * const context: QueueErrorContext = { id: 'job-1', operation: 'remove' }
