@@ -1,5 +1,5 @@
 import type { StoredEntry } from './types.js'
-import { isFiniteNumber, isInteger, isRecord, isString } from '@orkestrel/contract'
+import { holds, isFiniteNumber, isInteger, isRecord, isString } from '@orkestrel/contract'
 import { MAX_TIMEOUT_MS } from '@orkestrel/timeout'
 
 /**
@@ -66,14 +66,12 @@ export function isQueueTimeout(value: unknown): value is number {
  * ```
  */
 export function isQueueSignal(value: unknown): value is AbortSignal {
-	try {
+	return holds(() => {
 		const getter = Object.getOwnPropertyDescriptor(AbortSignal.prototype, 'aborted')?.get
 		if (getter === undefined) return false
 		Reflect.apply(getter, value, [])
 		return true
-	} catch {
-		return false
-	}
+	})
 }
 
 /**
@@ -96,10 +94,8 @@ export function isQueueSignal(value: unknown): value is AbortSignal {
  * ```
  */
 export function isStoredEntry(value: unknown): value is StoredEntry<unknown> {
-	try {
-		if (!isRecord(value)) return false
-		return isString(value.id) && 'input' in value && isQueueRetries(value.attempts)
-	} catch {
-		return false
-	}
+	return holds(
+		() =>
+			isRecord(value) && isString(value.id) && 'input' in value && isQueueRetries(value.attempts),
+	)
 }

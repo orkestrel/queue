@@ -1,4 +1,5 @@
 import type { QueueErrorContext, QueueErrorOptions } from './types.js'
+import { isInstance } from '@orkestrel/contract'
 
 /**
  * Represents a queue failure carrying a lowercase machine-readable `code`, optional
@@ -46,9 +47,5 @@ export class QueueError extends Error {
  * ```
  */
 export function isQueueError(value: unknown): value is QueueError {
-	try {
-		return value instanceof QueueError
-	} catch {
-		return false
-	}
+	return isInstance(value, QueueError)
 }

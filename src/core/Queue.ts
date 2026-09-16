@@ -12,7 +12,7 @@ import type {
 	StoredEntry,
 } from './types.js'
 import { createAbort } from '@orkestrel/abort'
-import { isString, preview } from '@orkestrel/contract'
+import { isError, isString, preview } from '@orkestrel/contract'
 import { Emitter } from '@orkestrel/emitter'
 import { createTimeout } from '@orkestrel/timeout'
 import { isQueueError, QueueError } from './errors.js'
@@ -308,7 +308,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		this.#abortPromise = barrier.promise
 		this.#stopped = true
 		this.#generation += 1
-		const error = new QueueError(reason instanceof Error ? reason.message : 'queue is aborted', {
+		const error = new QueueError(isError(reason) ? reason.message : 'queue is aborted', {
 			code: 'aborted',
 			...(reason === undefined ? {} : { cause: reason }),
 		})
@@ -394,14 +394,11 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 			}
 			this.#settleToken(token, {
 				success: false,
-				error: new QueueError(
-					error instanceof Error ? error.message : 'queue admission save failed',
-					{
-						code: 'store',
-						cause: error,
-						context: { id: entry.id, operation: 'save' },
-					},
-				),
+				error: new QueueError(isError(error) ? error.message : 'queue admission save failed', {
+					code: 'store',
+					cause: error,
+					context: { id: entry.id, operation: 'save' },
+				}),
 			})
 			this.#emitDrain()
 			return
@@ -614,7 +611,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		await this.#settle(token, {
 			success: false,
 			error: new QueueError(
-				signal.reason instanceof Error ? signal.reason.message : 'queue entry is aborted',
+				isError(signal.reason) ? signal.reason.message : 'queue entry is aborted',
 				{
 					code: 'aborted',
 					cause: signal.reason,
@@ -713,7 +710,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		} catch (error: unknown) {
 			return {
 				success: false,
-				error: error instanceof Error ? error : new Error(preview(error), { cause: error }),
+				error: isError(error) ? error : new Error(preview(error), { cause: error }),
 			}
 		} finally {
 			deadline?.clear()
