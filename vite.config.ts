@@ -56,15 +56,29 @@ const resolve = {
 // merges it, so an override's arrays elsewhere concatenate with the base's rather than
 // replacing them.
 export function mergeOverride(base: UserConfig, override?: UserConfig): UserConfig {
-	if (override === undefined) return base
-	if ('command' in override && 'mode' in override) {
+	if (override !== undefined && 'command' in override && 'mode' in override) {
 		if (typeof override.mode !== 'string') {
 			throw new Error('The project invocation carries no string mode')
 		}
-		return { ...base, mode: override.mode }
+		override = { mode: override.mode }
 	}
-	const merged: UserConfig = mergeConfig(base, override)
-	if (merged.plugins === undefined) return merged
+	const merged: UserConfig = override === undefined ? { ...base } : mergeConfig(base, override)
+	const name = merged.test?.name
+	const label = typeof name === 'string' ? name : name?.label
+	const browser = merged.test?.browser
+	if (label !== undefined && browser?.instances !== undefined) {
+		merged.test = {
+			...merged.test,
+			browser: {
+				...browser,
+				instances: browser.instances.map((instance) => ({
+					...instance,
+					name: instance.name ?? `${label} (${instance.browser})`,
+				})),
+			},
+		}
+	}
+	if (merged.plugins === undefined || override === undefined) return merged
 	const candidates = override.plugins ?? []
 	const taken = new Set<number>()
 	const selected: PluginOption[] = []
@@ -161,8 +175,10 @@ export function setup(override?: UserConfig): UserConfig {
 		test: {
 			name: { label: 'setup', color: 'white' },
 			include: ['tests/setup*.test.ts'],
-			exclude: ['tests/setupBrowser.test.ts'],
+			exclude: ['tests/setupBrowser.test.ts', 'tests/setupStyles.test.ts'],
 			setupFiles: ['./tests/setup.ts'],
+			pool: 'threads',
+			isolate: false,
 			environment: 'node',
 			browser: { enabled: false },
 		},
@@ -196,6 +212,7 @@ export function distribution(override?: UserConfig): UserConfig {
 			testTimeout: 120_000,
 			hookTimeout: 120_000,
 			fileParallelism: false,
+			sequence: { groupOrder: 1 },
 		},
 	}
 	return mergeOverride(project, override)
@@ -216,6 +233,7 @@ export function probe(override?: UserConfig): UserConfig {
 			environment: 'node',
 			browser: { enabled: false },
 			fileParallelism: false,
+			sequence: { groupOrder: 1 },
 			pool: 'threads',
 			benchmark: { include: ['tmp/probes/**/*.test.ts', 'tests/**/*.test.ts'] },
 		},
