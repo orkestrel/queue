@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { isString } from '@orkestrel/contract'
+import { captureError } from '@orkestrel/test'
 import { isQueueConcurrency, isQueueError, readOption, validateOption } from '@src/core'
 
 // src/core/helpers.ts — the two option leaves the constructor and `enqueue` share.
@@ -37,12 +38,9 @@ describe('readOption', () => {
 				throw cause
 			},
 		})
-		let failure: unknown
-		try {
-			readOption(options, 'id', 'queue entry id could not be read')
-		} catch (error: unknown) {
-			failure = error
-		}
+		const failure = captureError(() =>
+			readOption(options, 'id', 'queue entry id could not be read'),
+		)
 		if (!isQueueError(failure)) throw new Error('expected a QueueError')
 		expect(failure.message).toBe('queue entry id could not be read')
 		expect(failure.code).toBe('invalid')
@@ -63,12 +61,9 @@ describe('validateOption', () => {
 	})
 
 	it('throws a coded invalid failure carrying the option and the refused value', () => {
-		let failure: unknown
-		try {
-			validateOption(0, isQueueConcurrency, 'concurrency', 'queue concurrency must be positive')
-		} catch (error: unknown) {
-			failure = error
-		}
+		const failure = captureError(() =>
+			validateOption(0, isQueueConcurrency, 'concurrency', 'queue concurrency must be positive'),
+		)
 		if (!isQueueError(failure)) throw new Error('expected a QueueError')
 		expect(failure.message).toBe('queue concurrency must be positive')
 		expect(failure.code).toBe('invalid')
@@ -76,12 +71,9 @@ describe('validateOption', () => {
 	})
 
 	it('refuses undefined rather than treating absence as valid', () => {
-		let failure: unknown
-		try {
-			validateOption(undefined, isString, 'id', 'queue entry id must be a string')
-		} catch (error: unknown) {
-			failure = error
-		}
+		const failure = captureError(() =>
+			validateOption(undefined, isString, 'id', 'queue entry id must be a string'),
+		)
 		if (!isQueueError(failure)) throw new Error('expected a QueueError')
 		expect(failure.code).toBe('invalid')
 		expect(failure.context?.option).toBe('id')
@@ -93,12 +85,9 @@ describe('validateOption', () => {
 				throw new Error('hostile toString getter')
 			},
 		})
-		let failure: unknown
-		try {
-			validateOption(hostile, isString, 'id', 'queue entry id must be a string')
-		} catch (error: unknown) {
-			failure = error
-		}
+		const failure = captureError(() =>
+			validateOption(hostile, isString, 'id', 'queue entry id must be a string'),
+		)
 		if (!isQueueError(failure)) throw new Error('expected a QueueError')
 		expect(failure.context?.value).toBe(hostile)
 	})

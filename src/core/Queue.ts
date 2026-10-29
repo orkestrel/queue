@@ -17,6 +17,7 @@ import { Emitter } from '@orkestrel/emitter'
 import { createTimeout } from '@orkestrel/timeout'
 import { isQueueError, QueueError } from './errors.js'
 import { readOption, validateOption } from './helpers.js'
+import { QueueEntry } from './QueueEntry.js'
 import {
 	isQueueConcurrency,
 	isQueueRetries,
@@ -46,16 +47,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	readonly #store: QueueStoreInterface<TInput> | undefined
 	readonly #abort: AbortInterface = createAbort()
 	readonly #emitter: Emitter<QueueEventMap<TResult>>
-	readonly #entries = new Map<
-		PromiseWithResolvers<TResult>,
-		{
-			readonly id: string
-			readonly input: TInput
-			readonly options: QueueEntryOptions | undefined
-			readonly attempts: number
-			settled: boolean
-		}
-	>()
+	readonly #entries = new Map<PromiseWithResolvers<TResult>, QueueEntry<TInput>>()
 	readonly #live = new Map<string, PromiseWithResolvers<TResult>>()
 	readonly #pending: Array<PromiseWithResolvers<TResult>> = []
 	readonly #claims = new Set<PromiseWithResolvers<TResult>>()
@@ -214,26 +206,8 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	async restore(): Promise<void> {
 		if (this.#store === undefined || this.stopped || this.#destroyPromise !== undefined) return
 		const generation = this.#generation
-		const entries: Array<StoredEntry<TInput>> = []
-		let malformed = false
-		try {
-			const loaded = await this.#store.load()
-			for (const stored of loaded) {
-				const candidate = { id: stored.id, input: stored.input, attempts: stored.attempts }
-				if (!isStoredEntry(candidate)) {
-					malformed = true
-					break
-				}
-				entries.push(Object.freeze(candidate))
-			}
-		} catch (error: unknown) {
-			throw new QueueError('queue store load failed', {
-				code: 'store',
-				cause: error,
-				context: { operation: 'load' },
-			})
-		}
-		if (malformed) {
+		const entries = await this.#load(this.#store)
+		if (entries === undefined) {
 			throw new QueueError('queue store returned an invalid entry', {
 				code: 'store',
 				context: { operation: 'load' },
@@ -248,6 +222,35 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 			const token = this.#reserve(stored.id, stored.input, undefined, stored.attempts)
 			this.#accept(token)
 			void token.promise.catch(() => {})
+		}
+	}
+
+	async #load(
+		store: QueueStoreInterface<TInput>,
+	): Promise<ReadonlyArray<StoredEntry<TInput>> | undefined> {
+		try {
+			const loaded = await store.load()
+			const entries = [...this.#snapshot(loaded)]
+			return entries.some((entry) => entry === undefined)
+				? undefined
+				: entries.filter((entry) => entry !== undefined)
+		} catch (error: unknown) {
+			throw new QueueError('queue store load failed', {
+				code: 'store',
+				cause: error,
+				context: { operation: 'load' },
+			})
+		}
+	}
+
+	*#snapshot(loaded: Iterable<StoredEntry<TInput>>): Generator<StoredEntry<TInput> | undefined> {
+		for (const stored of loaded) {
+			const candidate = { id: stored.id, input: stored.input, attempts: stored.attempts }
+			if (!isStoredEntry(candidate)) {
+				yield undefined
+				return
+			}
+			yield Object.freeze(candidate)
 		}
 	}
 
@@ -366,7 +369,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		attempts: number,
 	): PromiseWithResolvers<TResult> {
 		const token = Promise.withResolvers<TResult>()
-		this.#entries.set(token, { id, input, options, attempts, settled: false })
+		this.#entries.set(token, new QueueEntry(id, input, options, attempts))
 		this.#live.set(id, token)
 		this.#drained = false
 		return token
@@ -577,12 +580,11 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		const retries = entry.options?.retries ?? this.#retries
 		const timeout = entry.options?.timeout ?? this.#timeout
 		const signal = entry.options?.signal
-		let completed = entry.attempts
 		this.#emitter.emit('start', entry.id)
 		while (true) {
 			if (await this.#interrupt(token, signal)) return
 			const outcome = await this.#attempt(entry.id, entry.input, timeout, signal)
-			completed += 1
+			const completed = entry.complete()
 			if (outcome.success) {
 				await this.#settle(token, outcome)
 				return
@@ -672,7 +674,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	#settleToken(token: PromiseWithResolvers<TResult>, outcome: Result<TResult, unknown>): boolean {
 		const entry = this.#entries.get(token)
 		if (entry === undefined || entry.settled) return false
-		entry.settled = true
+		entry.settle()
 		if (outcome.success) token.resolve(outcome.value)
 		else token.reject(outcome.error)
 		if (this.#live.get(entry.id) !== token) this.#entries.delete(token)
@@ -697,13 +699,10 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 	): Promise<Result<TResult>> {
 		const cancel =
 			signal === undefined ? this.#abort.signal : AbortSignal.any([this.#abort.signal, signal])
-		let deadline: TimeoutInterface | undefined
-		let attemptSignal = cancel
-		if (timeout > 0) {
-			deadline = createTimeout({ ms: timeout, signal: cancel })
-			deadline.start()
-			attemptSignal = AbortSignal.any([cancel, deadline.signal])
-		}
+		const deadline = timeout > 0 ? createTimeout({ ms: timeout, signal: cancel }) : undefined
+		deadline?.start()
+		const attemptSignal =
+			deadline === undefined ? cancel : AbortSignal.any([cancel, deadline.signal])
 		try {
 			const value = await this.#race(id, input, attemptSignal, deadline)
 			return { success: true, value }
@@ -805,12 +804,7 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 		barrier: PromiseWithResolvers<void>,
 		aborting: Promise<void>,
 	): Promise<void> {
-		let failure: unknown
-		try {
-			await aborting
-		} catch (error: unknown) {
-			failure = error
-		}
+		const failure: unknown = await aborting.catch((error: unknown) => error)
 		try {
 			await this.#finish(
 				[
@@ -822,14 +816,16 @@ export class Queue<TInput, TResult> implements QueueInterface<TInput, TResult> {
 				'queue destroy cleanup failed',
 			)
 		} catch (error: unknown) {
-			failure =
+			barrier.reject(
 				failure === undefined
 					? error
 					: new QueueError('queue destroy cleanup failed', {
 							code: 'cleanup',
 							cause: new AggregateError([failure, error], 'queue destroy cleanup failed'),
 							context: { operation: 'remove' },
-						})
+						}),
+			)
+			return
 		} finally {
 			this.#emitter.destroy()
 		}

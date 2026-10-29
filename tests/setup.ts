@@ -10,9 +10,20 @@
 // table the emitter suites record against.
 
 import type { ContractShape, Infer } from '@orkestrel/contract'
-import type { QueueStoreInterface, StoredEntry } from '@src/core'
+import type { RecorderInterface } from '@orkestrel/test'
+import type { QueueEntryOptions, QueueOptions, QueueStoreInterface, StoredEntry } from '@src/core'
 import { createMemoryDriver } from '@orkestrel/database'
 import { createDatabaseQueueStore } from '@src/core'
+
+/** Supplies an object context with a class prototype. */
+export class QueueContextFixture {
+	readonly id = 'job'
+}
+
+/** Creates a callable queue error context. */
+export function createCallableQueueContext(): (() => void) & { readonly id: string } {
+	return Object.assign(() => {}, { id: 'job' })
+}
 
 /** Lists the scripted primitives a stub store may override; each unsupplied one resolves a no-op. */
 export interface StubStoreOptions<TInput> {
@@ -74,23 +85,128 @@ export function createStubStore<TInput>(
 	const saves: Array<StoredEntry<TInput>> = []
 	const removes: string[] = []
 	const scripted = options
-	const store: QueueStoreInterface<TInput> = {
-		save(entry) {
-			saves.push(entry)
-			return scripted?.save === undefined ? Promise.resolve() : scripted.save(entry)
+	return {
+		store: {
+			save(entry) {
+				saves.push(entry)
+				return scripted?.save === undefined ? Promise.resolve() : scripted.save(entry)
+			},
+			remove(id) {
+				removes.push(id)
+				return scripted?.remove === undefined ? Promise.resolve() : scripted.remove(id)
+			},
+			load() {
+				return scripted?.load === undefined ? Promise.resolve([]) : scripted.load()
+			},
+			clear() {
+				return scripted?.clear === undefined ? Promise.resolve() : scripted.clear()
+			},
 		},
-		remove(id) {
-			removes.push(id)
-			return scripted?.remove === undefined ? Promise.resolve() : scripted.remove(id)
+		saves,
+		removes,
+	}
+}
+
+/** Tracks simultaneous queue handler calls and their peak. */
+export class QueueActivity {
+	#live = 0
+	#peak = 0
+
+	get peak(): number {
+		return this.#peak
+	}
+
+	enter(): void {
+		this.#live += 1
+		this.#peak = Math.max(this.#peak, this.#live)
+	}
+
+	leave(): void {
+		this.#live -= 1
+	}
+}
+
+/** Counts reads of one volatile queue option. */
+export class QueueReadCounter {
+	#count = 0
+
+	get count(): number {
+		return this.#count
+	}
+
+	read(): number {
+		this.#count += 1
+		return this.#count
+	}
+}
+
+/** Creates numeric options whose reads the supplied recorder observes. */
+export function createObservedQueueOptions(
+	concurrency: number,
+	retries: number,
+	timeout: number,
+	reads: RecorderInterface<[string]>,
+	errors: RecorderInterface<readonly [unknown, string]>,
+): QueueOptions<number, number> {
+	return {
+		handler: (input) => input,
+		get concurrency() {
+			reads.handler('concurrency')
+			return concurrency
 		},
-		load() {
-			return scripted?.load === undefined ? Promise.resolve([]) : scripted.load()
+		get retries() {
+			reads.handler('retries')
+			return retries
 		},
-		clear() {
-			return scripted?.clear === undefined ? Promise.resolve() : scripted.clear()
+		get timeout() {
+			reads.handler('timeout')
+			return timeout
+		},
+		get on() {
+			reads.handler('on')
+			return {}
+		},
+		get error() {
+			reads.handler('error')
+			return errors.handler
 		},
 	}
-	return { store, saves, removes }
+}
+
+/** Creates a stored entry whose id changes after its initial read. */
+export function createVolatileQueueEntry(reads: QueueReadCounter): StoredEntry<string> {
+	return {
+		get id() {
+			return reads.read() === 1 ? 'first' : 'second'
+		},
+		input: 'payload',
+		attempts: 0,
+	}
+}
+
+/** Creates enqueue options with observable property reads. */
+export function createObservedQueueEntryOptions(
+	reads: RecorderInterface<[string]>,
+	signal: AbortSignal,
+): QueueEntryOptions {
+	return {
+		get id() {
+			reads.handler('id')
+			return 'snapshotted'
+		},
+		get retries() {
+			reads.handler('retries')
+			return 0
+		},
+		get timeout() {
+			reads.handler('timeout')
+			return 0
+		},
+		get signal() {
+			reads.handler('signal')
+			return signal
+		},
+	}
 }
 
 /**

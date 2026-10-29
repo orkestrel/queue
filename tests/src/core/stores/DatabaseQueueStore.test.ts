@@ -122,7 +122,7 @@ describe('DatabaseQueueStore — at scale', () => {
 		const store = createDriverQueueStore(integerShape({ min: 0 }))
 		const total = 200
 		// Save 200 entries with shuffled-looking ids (zero-padded so string order is stable).
-		for (let index = 0; index < total; index += 1) {
+		for (const index of Array.from({ length: total }).keys()) {
 			const id = `job-${String(index).padStart(4, '0')}`
 			await store.save({ id, input: index, attempts: index % 4 })
 		}
@@ -137,7 +137,7 @@ describe('DatabaseQueueStore — at scale', () => {
 		expect(requireValue(loaded[total - 1]).input + 1).toBe(total)
 
 		// Remove every even-indexed entry; the odd ones remain, still in order.
-		for (let index = 0; index < total; index += 2) {
+		for (const index of Array.from({ length: total / 2 }, (_, offset) => offset * 2)) {
 			await store.remove(`job-${String(index).padStart(4, '0')}`)
 		}
 		const remaining = await store.load()
@@ -159,7 +159,7 @@ describe('DatabaseQueueStore — at scale', () => {
 describe('DatabaseQueueStore — upsert churn on one id', () => {
 	it('keeps exactly one row after 100 re-saves of the same id (the last value wins)', async () => {
 		const store = createDriverQueueStore(stringShape())
-		for (let attempt = 0; attempt < 100; attempt += 1) {
+		for (const attempt of Array.from({ length: 100 }).keys()) {
 			await store.save({ id: 'climbing', input: `payload-${attempt}`, attempts: attempt })
 		}
 		const loaded = await store.load()
@@ -171,7 +171,7 @@ describe('DatabaseQueueStore — upsert churn on one id', () => {
 	it('interleaves upserts across several ids without cross-contaminating rows', async () => {
 		const store = createDriverQueueStore(integerShape({ min: 0 }))
 		// Three ids, each re-saved several times with climbing attempts, interleaved.
-		for (let round = 0; round < 10; round += 1) {
+		for (const round of Array.from({ length: 10 }).keys()) {
 			await store.save({ id: 'a', input: round, attempts: round })
 			await store.save({ id: 'b', input: round * 10, attempts: round })
 			await store.save({ id: 'c', input: round * 100, attempts: round })

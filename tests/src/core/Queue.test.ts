@@ -11,8 +11,21 @@ import {
 	isQueueTimeout,
 	Queue,
 } from '@src/core'
-import { createRecorder, createRecorders, requireValue, waitForDelay } from '@orkestrel/test'
-import { createStubStore, QUEUE_EVENTS } from '../../setup.js'
+import {
+	captureError,
+	createRecorder,
+	createRecorders,
+	requireValue,
+	waitForDelay,
+} from '@orkestrel/test'
+import {
+	createObservedQueueEntryOptions,
+	createObservedQueueOptions,
+	createStubStore,
+	QUEUE_EVENTS,
+	QueueActivity,
+	QueueReadCounter,
+} from '../../setup.js'
 
 // src/core/Queue.ts — the cooperative concurrent job engine. Real behaviour,
 // no mocks: handlers are gated on manually-settled promises (Promise.withResolvers) so ordering /
@@ -56,17 +69,15 @@ describe('Queue — bounded concurrency', () => {
 			Promise.withResolvers<void>(),
 			Promise.withResolvers<void>(),
 		]
-		let live = 0
-		let peak = 0
+		const activity = new QueueActivity()
 		const started = createRecorder<[number]>()
 		const queue = new Queue<number, void>({
 			concurrency: 2,
 			handler: async (input) => {
 				started.handler(input)
-				live += 1
-				peak = Math.max(peak, live)
+				activity.enter()
 				await requireValue(gates[input]).promise
-				live -= 1
+				activity.leave()
 			},
 		})
 
@@ -88,7 +99,7 @@ describe('Queue — bounded concurrency', () => {
 			requireValue(gates[1]).resolve()
 			requireValue(gates[2]).resolve()
 			await all
-			expect(peak).toBe(2)
+			expect(activity.peak).toBe(2)
 			expect(queue.active).toBe(0)
 		} finally {
 			for (const gate of gates) gate.resolve()
@@ -887,21 +898,19 @@ describe('Queue — high concurrency drains many entries (saturation)', () => {
 	it('runs 120 entries through 8 workers exactly once, never exceeding the cap, draining fully', async () => {
 		const total = 120
 		const concurrency = 8
-		let live = 0
-		let peak = 0
+		const activity = new QueueActivity()
 		const ran = createRecorder<[number]>()
 		const startOrder: number[] = []
 		const queue = new Queue<number, number>({
 			concurrency,
 			handler: async (input) => {
 				startOrder.push(input)
-				live += 1
-				peak = Math.max(peak, live)
+				activity.enter()
 				// The queue's own `active` view must never exceed the cap at any await point.
 				expect(queue.active).toBeLessThanOrEqual(concurrency)
 				await waitForDelay(1)
 				ran.handler(input)
-				live -= 1
+				activity.leave()
 				return input * 2
 			},
 		})
@@ -918,7 +927,7 @@ describe('Queue — high concurrency drains many entries (saturation)', () => {
 		const seenInputs = new Set(ran.calls.map(([input]) => input))
 		expect(seenInputs.size).toBe(total)
 		// The cap held under saturation — never more than `concurrency` in flight.
-		expect(peak).toBe(concurrency)
+		expect(activity.peak).toBe(concurrency)
 		// FIFO dispatch: the first `concurrency` to start are 0..concurrency-1 (the initial
 		// batch the workers picked up in order).
 		expect(startOrder.slice(0, concurrency)).toEqual(
@@ -1230,7 +1239,7 @@ describe('Queue — restore at scale + racing a concurrent enqueue', () => {
 	it('restores 50 outstanding rows, running each exactly once, then drains', async () => {
 		const store = createMemoryQueueStore(stringShape())
 		// Seed 50 outstanding rows directly (a prior process's unfinished work).
-		for (let index = 0; index < 50; index += 1) {
+		for (const index of Array.from({ length: 50 }).keys()) {
 			await store.save({ id: `seed-${index}`, input: `payload-${index}`, attempts: 0 })
 		}
 
@@ -1653,39 +1662,39 @@ describe('Queue numeric contracts', () => {
 		const initialErrors = createRecorder<readonly [error: unknown, event: string]>()
 		const laterErrors = createRecorder<readonly [error: unknown, event: string]>()
 		const listenerFailure = new Error('constructor listener failure')
-		let concurrencyReads = 0
-		let retriesReads = 0
-		let timeoutReads = 0
-		let onReads = 0
-		let errorReads = 0
+		const concurrencyReads = new QueueReadCounter()
+		const retriesReads = new QueueReadCounter()
+		const timeoutReads = new QueueReadCounter()
+		const onReads = new QueueReadCounter()
+		const errorReads = new QueueReadCounter()
 		const queue = new Queue({
 			handler: (input: number) => input + 1,
 			get concurrency() {
-				concurrencyReads += 1
+				concurrencyReads.read()
 				reads.handler('concurrency')
-				return concurrencyReads === 1 ? 1 : 0
+				return concurrencyReads.count === 1 ? 1 : 0
 			},
 			get retries() {
-				retriesReads += 1
+				retriesReads.read()
 				reads.handler('retries')
-				return retriesReads === 1 ? 0 : -1
+				return retriesReads.count === 1 ? 0 : -1
 			},
 			get timeout() {
-				timeoutReads += 1
+				timeoutReads.read()
 				reads.handler('timeout')
-				return timeoutReads === 1 ? 0 : -1
+				return timeoutReads.count === 1 ? 0 : -1
 			},
 			get on() {
-				onReads += 1
+				onReads.read()
 				reads.handler('on')
-				return onReads === 1
+				return onReads.count === 1
 					? { enqueue: initialEnqueue.handler }
 					: { enqueue: laterEnqueue.handler }
 			},
 			get error() {
-				errorReads += 1
+				errorReads.read()
 				reads.handler('error')
-				return errorReads === 1 ? initialErrors.handler : laterErrors.handler
+				return errorReads.count === 1 ? initialErrors.handler : laterErrors.handler
 			},
 		})
 
@@ -1707,39 +1716,9 @@ describe('Queue numeric contracts', () => {
 	it('fails each invalid numeric constructor option before reading later options', () => {
 		const reads = createRecorder<[string]>()
 		const errors = createRecorder<readonly [error: unknown, event: string]>()
-		let concurrency = 0
-		let retries = 0
-		let timeout = 0
-		const options = {
-			handler: (input: number) => input,
-			get concurrency() {
-				reads.handler('concurrency')
-				return concurrency
-			},
-			get retries() {
-				reads.handler('retries')
-				return retries
-			},
-			get timeout() {
-				reads.handler('timeout')
-				return timeout
-			},
-			get on() {
-				reads.handler('on')
-				return {}
-			},
-			get error() {
-				reads.handler('error')
-				return errors.handler
-			},
-		}
-
-		let failure: unknown
-		try {
-			void new Queue(options)
-		} catch (error: unknown) {
-			failure = error
-		}
+		const failure = captureError(
+			() => new Queue(createObservedQueueOptions(0, 0, 0, reads, errors)),
+		)
 		if (failure === null || !isQueueError(failure)) {
 			throw new Error('expected invalid concurrency QueueError')
 		}
@@ -1748,35 +1727,25 @@ describe('Queue numeric contracts', () => {
 		expect(reads.calls).toEqual([['concurrency']])
 
 		reads.clear()
-		concurrency = 1
-		retries = -1
-		failure = undefined
-		try {
-			void new Queue(options)
-		} catch (error: unknown) {
-			failure = error
-		}
-		if (failure === null || !isQueueError(failure)) {
+		const retryFailure = captureError(
+			() => new Queue(createObservedQueueOptions(1, -1, 0, reads, errors)),
+		)
+		if (retryFailure === null || !isQueueError(retryFailure)) {
 			throw new Error('expected invalid retries QueueError')
 		}
-		expect(failure.code).toBe('invalid')
-		expect(failure.context).toEqual({ option: 'retries', value: -1 })
+		expect(retryFailure.code).toBe('invalid')
+		expect(retryFailure.context).toEqual({ option: 'retries', value: -1 })
 		expect(reads.calls).toEqual([['concurrency'], ['retries']])
 
 		reads.clear()
-		retries = 0
-		timeout = -1
-		failure = undefined
-		try {
-			void new Queue(options)
-		} catch (error: unknown) {
-			failure = error
-		}
-		if (failure === null || !isQueueError(failure)) {
+		const timeoutFailure = captureError(
+			() => new Queue(createObservedQueueOptions(1, 0, -1, reads, errors)),
+		)
+		if (timeoutFailure === null || !isQueueError(timeoutFailure)) {
 			throw new Error('expected invalid timeout QueueError')
 		}
-		expect(failure.code).toBe('invalid')
-		expect(failure.context).toEqual({ option: 'timeout', value: -1 })
+		expect(timeoutFailure.code).toBe('invalid')
+		expect(timeoutFailure.context).toEqual({ option: 'timeout', value: -1 })
 		expect(reads.calls).toEqual([['concurrency'], ['retries'], ['timeout']])
 	})
 
@@ -2023,24 +1992,7 @@ describe('Queue — public guards and runtime ids', () => {
 	it('snapshots every supplied enqueue option exactly once', async () => {
 		const reads = createRecorder<[string]>()
 		const controller = new AbortController()
-		const options = {
-			get id() {
-				reads.handler('id')
-				return 'snapshotted'
-			},
-			get retries() {
-				reads.handler('retries')
-				return 0
-			},
-			get timeout() {
-				reads.handler('timeout')
-				return 0
-			},
-			get signal() {
-				reads.handler('signal')
-				return controller.signal
-			},
-		}
+		const options = createObservedQueueEntryOptions(reads, controller.signal)
 		const queue = new Queue<number, number>({ handler: (input) => input })
 		await expect(Reflect.apply(queue.enqueue, queue, [1, options])).resolves.toBe(1)
 		expect(reads.calls).toEqual([['id'], ['retries'], ['timeout'], ['signal']])
@@ -2204,12 +2156,12 @@ describe('Queue — exclusive cleanup ownership and lifecycle visibility', () =>
 	it('shares overlapping cleanup, retries a failure, then safely reuses the id', async () => {
 		const first = Promise.withResolvers<void>()
 		const removes = createRecorder<[string]>()
-		let fail = true
+		const recovered = new AbortController()
 		const { store } = createStubStore<string>({
 			remove: async (id) => {
 				removes.handler(id)
 				if (removes.count === 1) await first.promise
-				if (fail) throw new Error('first cleanup failed')
+				if (!recovered.signal.aborted) throw new Error('first cleanup failed')
 			},
 		})
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
@@ -2230,7 +2182,7 @@ describe('Queue — exclusive cleanup ownership and lifecycle visibility', () =>
 		expect(removes.count).toBe(1)
 		expect(queue.count).toBe(1)
 
-		fail = false
+		recovered.abort()
 		queue.start()
 		await expect(queue.clear()).resolves.toBeUndefined()
 		expect(removes.count).toBe(2)
@@ -2310,12 +2262,12 @@ describe('Queue — active cleanup and handler failure isolation', () => {
 	it('clear neither waits for nor inherits active cleanup failure', async () => {
 		const removal = Promise.withResolvers<void>()
 		const removes = createRecorder<[]>()
-		let fail = true
+		const recovered = new AbortController()
 		const { store } = createStubStore<string>({
 			remove: async () => {
 				removes.handler()
 				if (removes.count === 1) await removal.promise
-				if (fail) throw new Error('active removal failed')
+				if (!recovered.signal.aborted) throw new Error('active removal failed')
 			},
 		})
 		const queue = new Queue<string, string>({ store, handler: (input) => input })
@@ -2335,7 +2287,7 @@ describe('Queue — active cleanup and handler failure isolation', () => {
 		expect(queue.active).toBe(0)
 		expect(queue.count).toBe(1)
 
-		fail = false
+		recovered.abort()
 		await expect(queue.clear()).resolves.toBeUndefined()
 		expect(queue.count).toBe(0)
 	})
@@ -2359,16 +2311,15 @@ describe('Queue — active cleanup and handler failure isolation', () => {
 		const running = queue.enqueue('active')
 		const failure = running.catch((error: unknown) => error)
 		await started.promise
-		let clearing: Promise<void> | undefined
+		const clearing = Promise.withResolvers<Promise<void>>()
 		const reaction = removal.promise.catch(() => {
 			boundary.handler(queue.active)
-			clearing = queue.clear()
+			clearing.resolve(queue.clear())
 		})
 
 		removal.reject(new Error('first removal failed'))
 		await reaction
-		if (clearing === undefined) throw new Error('expected clear at the rejection boundary')
-		await expect(clearing).resolves.toBeUndefined()
+		await expect(clearing.promise).resolves.toBeUndefined()
 		expect(boundary.calls).toEqual([[1]])
 		expect(removes.count).toBe(1)
 

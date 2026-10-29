@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { numberShape, objectShape, stringShape } from '@orkestrel/contract'
 import { createMemoryQueueStore, isQueueError, MemoryQueueStore } from '@src/core'
-import { createStoredEntry } from '../../../setup.js'
+import { createStoredEntry, createVolatileQueueEntry, QueueReadCounter } from '../../../setup.js'
 
 // src/core/stores/MemoryQueueStore.ts — the zero-plumbing DEFAULT queue store
 // over a plain `Map` (the twin of DatabaseQueueStore, which wraps an `@orkestrel/database`
@@ -101,7 +101,7 @@ describe('MemoryQueueStore — at scale', () => {
 	it('round-trips 200 entries, removes a half, then clears', async () => {
 		const store = new MemoryQueueStore(numberShape())
 		const total = 200
-		for (let index = 0; index < total; index += 1) {
+		for (const index of Array.from({ length: total }).keys()) {
 			await store.save(createStoredEntry(`job-${String(index).padStart(4, '0')}`, index, index % 4))
 		}
 
@@ -111,7 +111,7 @@ describe('MemoryQueueStore — at scale', () => {
 		expect(loaded[total - 1]).toEqual({ id: 'job-0199', input: 199, attempts: 3 })
 
 		// Remove every even-indexed entry; the odd ones remain.
-		for (let index = 0; index < total; index += 2) {
+		for (const index of Array.from({ length: total / 2 }, (_, offset) => offset * 2)) {
 			await store.remove(`job-${String(index).padStart(4, '0')}`)
 		}
 		const remaining = await store.load()
@@ -133,7 +133,7 @@ describe('MemoryQueueStore — at scale', () => {
 describe('MemoryQueueStore — upsert churn on one id', () => {
 	it('keeps exactly one row after 100 re-saves of the same id (the last value wins)', async () => {
 		const store = new MemoryQueueStore(stringShape())
-		for (let attempt = 0; attempt < 100; attempt += 1) {
+		for (const attempt of Array.from({ length: 100 }).keys()) {
 			await store.save(createStoredEntry('climbing', `payload-${attempt}`, attempt))
 		}
 		const loaded = await store.load()
@@ -143,7 +143,7 @@ describe('MemoryQueueStore — upsert churn on one id', () => {
 
 	it('interleaves upserts across several ids without cross-contaminating rows', async () => {
 		const store = new MemoryQueueStore(numberShape())
-		for (let round = 0; round < 10; round += 1) {
+		for (const round of Array.from({ length: 10 }).keys()) {
 			await store.save(createStoredEntry('a', round, round))
 			await store.save(createStoredEntry('b', round * 10, round))
 			await store.save(createStoredEntry('c', round * 100, round))
@@ -214,17 +214,10 @@ describe('MemoryQueueStore contract and ownership', () => {
 
 	it('captures a stateful id accessor once and keys the owned snapshot by that value', async () => {
 		const store = createMemoryQueueStore(stringShape())
-		let reads = 0
-		const entry = {
-			get id() {
-				reads += 1
-				return reads === 1 ? 'first' : 'second'
-			},
-			input: 'payload',
-			attempts: 0,
-		}
+		const reads = new QueueReadCounter()
+		const entry = createVolatileQueueEntry(reads)
 		await expect(Reflect.apply(store.save, store, [entry])).resolves.toBeUndefined()
-		expect(reads).toBe(1)
+		expect(reads.count).toBe(1)
 		expect(await store.load()).toEqual([{ id: 'first', input: 'payload', attempts: 0 }])
 		await store.remove('first')
 		expect(await store.load()).toEqual([])
