@@ -51,7 +51,7 @@ const status = await queue.enqueue('https://example.com')
 
 ### Factories
 
-| API                        | Kind     | Summary                                                                                                                                                                                                                     |
+| Name                       | Kind     | Summary                                                                                                                                                                                                                     |
 | -------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `createQueue`              | function | Creates a concurrent, cooperative job queue — a bounded-concurrency engine that runs each enqueued input through a handler, with retries and a per-attempt timeout / abort, all over the L1 `Abort` / `Timeout` primitives. |
 | `createDatabaseQueueStore` | function | Creates a `DatabaseQueueStore` over any `DriverInterface` — the durable, driver-pluggable backing for a queue's outstanding entries, across a memory, JSON, or SQLite driver.                                               |
@@ -59,7 +59,7 @@ const status = await queue.enqueue('https://example.com')
 
 ### Classes
 
-| API                  | Kind  | Summary                                                                                                                                                                                                                           |
+| Name                 | Kind  | Summary                                                                                                                                                                                                                           |
 | -------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Queue`              | class | Represents a concurrent, cooperative FIFO job queue — a wake-park worker loop with retries, a per-attempt timeout, abort, and optional outstanding-work persistence.                                                              |
 | `QueueError`         | class | Represents a queue failure carrying a lowercase machine-readable `code`, optional structured context, and an optional cause.                                                                                                      |
@@ -70,7 +70,7 @@ const status = await queue.enqueue('https://example.com')
 
 A `Shape` cell holds an interface's data members as bare names in braces, `?` marking an optional member and `plus` introducing its call-signature members, and a type alias's own type literal with a union's arms escaped as `\|`.
 
-| Type                  | Kind      | Shape                                                                                                                  | Summary                                                                                                                                                                                             |
+| Name                  | Kind      | Shape                                                                                                                  | Summary                                                                                                                                                                                             |
 | --------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `QueueContext`        | interface | `{ id, signal }`                                                                                                       | Represents the per-attempt context a queue handler receives.                                                                                                                                        |
 | `QueueHandler`        | type      | `(input: TInput, context: QueueContext) => Promise<TResult> \| TResult`                                                | Runs one queued entry's work; a rejection triggers a retry while attempts remain.                                                                                                                   |
@@ -89,7 +89,7 @@ A `Shape` cell holds an interface's data members as bare names in braces, `?` ma
 
 In a guard table a `Shape` cell holds the type the guard narrows to.
 
-| API                  | Kind     | Shape                  | Summary                                                                                                                                           |
+| Name                 | Kind     | Shape                  | Summary                                                                                                                                           |
 | -------------------- | -------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `isQueueError`       | function | `QueueError`           | Determines whether an unknown value is a `QueueError`, staying total for a hostile value.                                                         |
 | `isQueueConcurrency` | function | `number`               | Determines whether a value is a valid queue concurrency — a positive safe integer.                                                                |
@@ -120,7 +120,7 @@ isStoredEntry({ id: 'job-1', input: 'task', attempts: 0 }) // true
 
 `readOption` and `validateOption` back the queue's option handling. `enqueue` reads every entry option through `readOption`, because a caller's `QueueEntryOptions` is foreign; `enqueue` and the constructor then check what they read through `validateOption`.
 
-| API              | Kind     | Summary                                                                                                                                                              |
+| Name             | Kind     | Summary                                                                                                                                                              |
 | ---------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `readOption`     | function | Reads one named option from a caller-supplied entry options object exactly once, containing a throwing getter as a coded failure.                                    |
 | `validateOption` | function | Validates one already-read queue option against its guard, and throws the coded invalid failure carrying the option and the refused value when the guard refuses it. |
