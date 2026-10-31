@@ -32,39 +32,39 @@ Construction is a strict JavaScript boundary. `validateAbortOptions` normalizes 
 
 ### Factories
 
-| API           | Kind     | Summary                                                                                                                                                                                                                                       |
-| ------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createAbort` | function | Creates a cancellation handle from validated options and returns it as an `AbortInterface` — a resolved trace `id` and a `signal` already linked to any parent given, so a caller holds the published contract rather than the `Abort` class. |
+| Name          | Kind     | Signature                                    | Summary                                                                                                                                                                                                                                       |
+| ------------- | -------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `createAbort` | function | `(options?: AbortOptions) => AbortInterface` | Creates a cancellation handle from validated options and returns it as an `AbortInterface` — a resolved trace `id` and a `signal` already linked to any parent given, so a caller holds the published contract rather than the `Abort` class. |
 
 ### Helpers
 
-| API                    | Kind     | Summary                                                                                                                     |
-| ---------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `validateAbortOptions` | function | Validates once-read abort construction options and returns a fresh normalized copy omitting absent optional keys.           |
-| `linkSignal`           | function | Links an own `AbortSignal` to an optional parent signal, returning `AbortSignal.any([own, parent])` when a parent is given. |
+| Name                   | Kind     | Signature                                                             | Summary                                                                                                                     |
+| ---------------------- | -------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `validateAbortOptions` | function | `(options?: AbortOptions) => AbortOptions`                            | Validates once-read abort construction options and returns a fresh normalized copy omitting absent optional keys.           |
+| `linkSignal`           | function | `(own: AbortSignal, parent: AbortSignal \| undefined) => AbortSignal` | Links an own `AbortSignal` to an optional parent signal, returning `AbortSignal.any([own, parent])` when a parent is given. |
 
 ### Validators
 
 In a guard table a `Shape` cell holds the type the guard narrows to.
 
-| API             | Kind     | Shape         | Summary                                                                                                                       |
-| --------------- | -------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `isAbortSignal` | function | `AbortSignal` | Determines whether a value is a native `AbortSignal`, staying total for structural spoofs and for hostile or revoked proxies. |
+| Name            | Kind     | Signature                                  | Summary                                                                                                                       |
+| --------------- | -------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `isAbortSignal` | function | `(value: unknown) => value is AbortSignal` | Determines whether a value is a native `AbortSignal`, staying total for structural spoofs and for hostile or revoked proxies. |
 
 ### Classes
 
-| API     | Kind  | Summary                                                                                                                                                                                                |
-| ------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Abort` | class | Implements `AbortInterface` over a private `AbortController` the instance owns, resolving the trace `id` at construction and exposing either that controller's own `signal` or one linked to a parent. |
+| Name    | Kind  | Signature                                        | Summary                                                                                                                                                                                                |
+| ------- | ----- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Abort` | class | `new (options?: AbortOptions) => AbortInterface` | Implements `AbortInterface` over a private `AbortController` the instance owns, resolving the trace `id` at construction and exposing either that controller's own `signal` or one linked to a parent. |
 
 ### Types
 
 A `Shape` cell holds an interface's data members as bare names in braces, `?` marking an optional member and `plus` introducing its call-signature members, and a type alias's own type literal with a union's arms escaped as `\|`.
 
-| Type             | Kind      | Shape                                | Summary                                                                                                                                                                                                |
-| ---------------- | --------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `AbortOptions`   | interface | `{ id?, signal? }`                   | Represents the options for `createAbort` and `Abort` construction.                                                                                                                                     |
-| `AbortInterface` | interface | `{ id, signal, aborted } plus abort` | Represents the cancellation contract a consumer holds — a traceable `id`, the exposed `AbortSignal`, an `aborted` reading of it, and an idempotent `abort` that cancels the work bound to that signal. |
+| Name             | Kind      | Signature                          | Summary                                                                                                                                                                                                |
+| ---------------- | --------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `AbortOptions`   | interface | `{ id?, signal? }`                 | Represents the options for `createAbort` and `Abort` construction.                                                                                                                                     |
+| `AbortInterface` | interface | `{ id, signal, aborted, abort() }` | Represents the cancellation contract a consumer holds — a traceable `id`, the exposed `AbortSignal`, an `aborted` reading of it, and an idempotent `abort` that cancels the work bound to that signal. |
 
 The `id`, `signal`, and `aborted` members of `AbortInterface` are `readonly` data members (Surface rows, earlier) — its call-signature method is documented under [Methods](#methods).
 
