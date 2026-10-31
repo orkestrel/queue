@@ -57,15 +57,11 @@ defaults to a random UUID.
 
 ### Constants
 
-A `Shape` cell holds the constant's declared type.
-
 | Name             | Kind  | Signature    | Summary                                                                               |
 | ---------------- | ----- | ------------ | ------------------------------------------------------------------------------------- |
 | `MAX_TIMEOUT_MS` | const | `2147483647` | Names the largest timeout duration the package accepts, `2_147_483_647` milliseconds. |
 
 ### Validators
-
-In a guard table a `Shape` cell holds the type the guard narrows to.
 
 | Name                | Kind     | Signature                                  | Summary                                                                                                                                |
 | ------------------- | -------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -79,8 +75,6 @@ In a guard table a `Shape` cell holds the type the guard narrows to.
 | `validateTimeoutOptions` | function | `(options: TimeoutOptions) => TimeoutOptions` | Validates once-read timeout construction options and returns a fresh normalized copy omitting absent optional keys. |
 
 ### Types
-
-A `Shape` cell holds an interface's data members as bare names in braces, `?` marking an optional member and `plus` introducing its call-signature members, and a type alias's own type literal with a union's arms escaped as `\|`.
 
 | Name               | Kind      | Signature                                       | Summary                                                                                   |
 | ------------------ | --------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------- |

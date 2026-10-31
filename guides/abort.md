@@ -45,8 +45,6 @@ Construction is a strict JavaScript boundary. `validateAbortOptions` normalizes 
 
 ### Validators
 
-In a guard table a `Shape` cell holds the type the guard narrows to.
-
 | Name            | Kind     | Signature                                  | Summary                                                                                                                       |
 | --------------- | -------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
 | `isAbortSignal` | function | `(value: unknown) => value is AbortSignal` | Determines whether a value is a native `AbortSignal`, staying total for structural spoofs and for hostile or revoked proxies. |
@@ -58,8 +56,6 @@ In a guard table a `Shape` cell holds the type the guard narrows to.
 | `Abort` | class | `new (options?: AbortOptions) => AbortInterface` | Implements `AbortInterface` over a private `AbortController` the instance owns, resolving the trace `id` at construction and exposing either that controller's own `signal` or one linked to a parent. |
 
 ### Types
-
-A `Shape` cell holds an interface's data members as bare names in braces, `?` marking an optional member and `plus` introducing its call-signature members, and a type alias's own type literal with a union's arms escaped as `\|`.
 
 | Name             | Kind      | Signature                          | Summary                                                                                                                                                                                                |
 | ---------------- | --------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
