@@ -1,7 +1,7 @@
 import type { QueueContext, QueueEventMap, StoredEntry } from '@src/core'
 import type { QueueEvent } from '../../setup.js'
 import { describe, expect, it } from 'vitest'
-import { stringShape } from '@orkestrel/contract'
+import { objectShape, stringShape } from '@orkestrel/contract'
 import {
 	createMemoryQueueStore,
 	isQueueConcurrency,
@@ -20,6 +20,7 @@ import {
 } from '@orkestrel/test'
 import {
 	createObservedQueueEntryOptions,
+	createDriverQueueStore,
 	createObservedQueueOptions,
 	createStubStore,
 	QUEUE_EVENTS,
@@ -328,6 +329,31 @@ describe('Queue — cooperative wake-park (no busy-loop)', () => {
 // best-effort.
 
 describe('Queue — durability: persist on accept, remove on settle', () => {
+	it('rejects an enqueue whose input a database store refuses, before the handler runs', async () => {
+		const store = createDriverQueueStore(objectShape({ url: stringShape() }))
+		const handled = createRecorder<[{ readonly url: string }]>()
+		const queue = new Queue<{ readonly url: string }, string>({
+			store,
+			handler: (input) => {
+				handled.handler(input)
+				return 'ok'
+			},
+		})
+		// JSON.parse supplies a wider object than the input shape declares.
+		const input: { readonly url: string } = JSON.parse('{"url":"https://example.com","extra":1}')
+
+		await expect(queue.enqueue(input)).rejects.toMatchObject({
+			code: 'store',
+			context: { operation: 'save' },
+			cause: {
+				code: 'VALIDATION',
+				context: { faults: [{ reason: 'extra', path: ['input', 'extra'] }] },
+			},
+		})
+		expect(handled.count).toBe(0)
+		expect(await store.load()).toEqual([])
+	})
+
 	it('saves an entry on enqueue and removes it once it completes', async () => {
 		const store = createMemoryQueueStore(stringShape())
 		const gate = Promise.withResolvers<string>()

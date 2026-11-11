@@ -25,6 +25,18 @@ import { createDriverQueueStore } from '../../../setup.js'
 // an empty array) — each surviving the round-trip AND coming back fully typed with no `as`.
 
 describe('DatabaseQueueStore (over a memory driver)', () => {
+	it('refuses a save whose input carries an undeclared nested key, naming it', async () => {
+		const store = createDriverQueueStore(objectShape({ url: stringShape() }))
+		// JSON.parse supplies a wider object than the input shape declares.
+		const input: { readonly url: string } = JSON.parse('{"url":"https://example.com","extra":1}')
+
+		await expect(store.save({ id: 'job-1', input, attempts: 0 })).rejects.toMatchObject({
+			code: 'VALIDATION',
+			context: { faults: [{ reason: 'extra', path: ['input', 'extra'] }] },
+		})
+		expect(await store.load()).toEqual([])
+	})
+
 	it('round-trips a saved entry through load() — value and type', async () => {
 		const store = createDriverQueueStore(stringShape())
 		await store.save({ id: 'job-1', input: 'https://example.com', attempts: 0 })
