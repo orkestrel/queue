@@ -1,6 +1,6 @@
 {
 	"name": "@orkestrel/queue",
-	"version": "0.0.22",
+	"version": "0.0.23",
 	"description": "A typed, persistent-capable FIFO job queue — bounded concurrency, retries, per-attempt timeout/abort, and an optional durable store for resuming outstanding work after a restart. Part of the @orkestrel line.",
 	"keywords": [
 		"async",
@@ -91,6 +91,6 @@
 		"vitest": "^5.1.0"
 	},
 	"engines": {
-		"node": ">=22.12.0"
+		"node": "^22.18.0 || >=24.4.0"
 	}
 }
